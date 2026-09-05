@@ -503,6 +503,10 @@ function checkShouldPreload() {
   if (!canLoadMore())
     return
 
+  // 关闭填满首屏时，短列表的哨兵会一直相交；不能据此把全部历史刷完。
+  if (!props.showLoadingMoreSkeleton && !isListOverflowing())
+    return
+
   // 优先使用 IntersectionObserver 的结果。
   if (supportsIntersectionObserver && isLoadMoreSentinelIntersecting.value) {
     triggerLoadMore()
@@ -614,7 +618,7 @@ watch(() => props.loading, (newLoading, oldLoading) => {
     nextTick(() => {
       // 用户可能在请求结束前刚好滚到底部。此时 sentinel 没有新的相交变化，
       // 直接按滚动容器几何位置补触发，避免丢掉这次 loadMore。
-      if (isScrollAtBottom()) {
+      if (isScrollAtBottom() && (props.showLoadingMoreSkeleton || isListOverflowing())) {
         triggerLoadMore()
         return
       }
@@ -849,6 +853,13 @@ function getRemainingScroll(scrollElement: HTMLElement): number {
 
 function isUsableScrollElement(scrollElement: HTMLElement | null): scrollElement is HTMLElement {
   return !!scrollElement && scrollElement.clientHeight > 0 && scrollElement.scrollHeight > 0
+}
+
+function isListOverflowing(): boolean {
+  const scrollElement = findScrollElement()
+  if (!isUsableScrollElement(scrollElement))
+    return false
+  return scrollElement.scrollHeight > scrollElement.clientHeight + 1
 }
 
 function isWithinPreloadDistance(): boolean {

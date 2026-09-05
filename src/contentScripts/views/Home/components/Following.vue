@@ -26,7 +26,7 @@
  *
  * ## 排序策略
  *
- * UP主列表按最新投稿时间降序排列；没有投稿记录时使用关注时间。
+ * 可按更新时间或关注分组展示，分组内按更新时间排序；没有投稿记录时使用关注时间。
  *
  * ## 布局模式
  *
@@ -45,6 +45,7 @@ import type { Author, Video } from '~/components/VideoCard/types'
 import VideoCardGrid from '~/components/VideoCardGrid.vue'
 import { useBewlyApp } from '~/composables/useAppProvider'
 import { useHomeTabState } from '~/composables/useHomeTabState'
+import { OVERLAY_SCROLL_BAR_SCROLL } from '~/constants/globalEvents'
 import type { GridLayoutType } from '~/logic'
 import { settings } from '~/logic'
 import {
@@ -57,7 +58,13 @@ import type { DataItem as MomentItem, MomentResult } from '~/models/moment/momen
 import { BadgeText } from '~/models/moment/moment'
 import api from '~/utils/api'
 import { calcTimeSince, parseStatNumber } from '~/utils/dataFormatter'
+import type { FollowingGroup, FollowingGroupsResult, FollowingRelationUser, WhisperFollowingsResult } from '~/utils/followingGroups'
+import { getFollowingGroupIds, groupFollowingUploaders, WHISPER_GROUP_ID } from '~/utils/followingGroups'
 import { decodeHtmlEntities } from '~/utils/htmlDecode'
+import emitter from '~/utils/mitt'
+
+import FollowingGroupMenu from './FollowingGroupMenu.vue'
+import FollowingUploaderMenu from './FollowingUploaderMenu.vue'
 
 interface Props {
   gridLayout?: GridLayoutType
@@ -71,7 +78,12 @@ interface UploaderInfo {
   hasUpdate: boolean
   hasPostTime: boolean
   lastUpdateTime: number
+  groupIds: number[]
 }
+
+type UploaderRow
+  = | { key: string, type: 'group', id: number, name: string, count: number, expanded: boolean }
+    | { key: string, type: 'uploader', uploader: UploaderInfo }
 
 interface VideoElement {
   uniqueId: string
@@ -104,9 +116,23 @@ tabState.capture('uploaderScrollTop', () => uploaderScrollRef.value?.scrollTop ?
 const { scrollViewportRef, handlePageRefresh, handleReachBottom, canRefreshHomeSubPage } = useBewlyApp()
 const videoList = tabState.ref<VideoElement[]>('videoList', [])
 const uploaderList = tabState.ref<UploaderInfo[]>('uploaderList', [])
+const followingGroups = tabState.ref<FollowingGroup[]>('followingGroups', [])
+const followingGroupsLoaded = tabState.ref('followingGroupsLoaded', false)
+const expandedGroupIds = tabState.ref<number[]>('expandedGroupIds', [-10])
+const whispersLoaded = tabState.ref('whispersLoaded', false)
+const whispersPage = tabState.ref('whispersPage', 1)
+const whispersLoading = ref(false)
+const whispersRequestFailed = ref(false)
+// 用户操作优先于同时在途的列表请求，避免旧响应恢复已移出的成员。
+const changedUploaderMids = new Set<number>()
+const groupsLoading = ref(false)
+const groupsRequestFailed = ref(false)
+const uploaderMenuRef = ref<InstanceType<typeof FollowingUploaderMenu>>()
+const groupMenuRef = ref<InstanceType<typeof FollowingGroupMenu>>()
 const selectedUploader = tabState.ref<number | null>('selectedUploader', null) // null means "All"
 const previousSelectedUploader = tabState.ref<number | null>('previousSelectedUploader', null)
 const selectionToken = ref<number>(0) // 用于防止竞态条件的令牌
+const suppressUploaderAutoLoadMore = ref(false)
 const liveListLoaded = tabState.ref<boolean>('liveListLoaded', false) // 标记直播列表是否已加载（防止重复加载）
 
 // Provide selectedUploader to child components for preview loading control
@@ -126,6 +152,34 @@ const currentUserMid = tabState.ref<number>('currentUserMid', 0) // 当前登录
 
 function syncRefreshAvailability() {
   canRefreshHomeSubPage.value = isRefreshContextActive.value && selectedUploader.value === null
+}
+
+function getFeedStartScrollTop() {
+  return settings.value.useSearchPageModeOnHomePage ? 510 : 0
+}
+
+function pinFeedScrollToStart() {
+  const viewport = scrollViewportRef.value
+  if (!viewport)
+    return
+  const token = selectionToken.value
+  const scrollTarget = getFeedStartScrollTop()
+  const pinScroll = () => {
+    if (tabState.isCurrent() && token === selectionToken.value && scrollViewportRef.value === viewport)
+      viewport.scrollTop = scrollTarget
+  }
+  pinScroll()
+  void nextTick(() => {
+    pinScroll()
+    requestAnimationFrame(pinScroll)
+  })
+}
+
+function handleFeedScroll(scrollTop: number) {
+  if (!tabState.isCurrent() || isLoading.value)
+    return
+  if (scrollTop > getFeedStartScrollTop() + 1)
+    suppressUploaderAutoLoadMore.value = false
 }
 
 watch(selectedUploader, syncRefreshAvailability, { immediate: true })
@@ -199,25 +253,14 @@ function shouldFilterVideo(item: MomentItem): boolean {
 }
 
 function sortUploaderList(excludeMid: number | null = null) {
-  let excludedUploader: UploaderInfo | undefined
-  let excludedIndex = -1
-
-  if (excludeMid !== null) {
-    excludedIndex = uploaderList.value.findIndex(u => u.mid === excludeMid)
-    if (excludedIndex !== -1) {
-      excludedUploader = uploaderList.value[excludedIndex]
-      uploaderList.value.splice(excludedIndex, 1)
-    }
-  }
+  // 浏览单个 UP 时保持整张列表的顺序，避免分组内其他成员重排牵动点击位置。
+  if (excludeMid !== null)
+    return
 
   uploaderList.value.sort((a, b) => {
     // 按 lastUpdateTime 降序排序（最新的在前）
     return b.lastUpdateTime - a.lastUpdateTime
   })
-
-  if (excludedUploader && excludedIndex !== -1) {
-    uploaderList.value.splice(excludedIndex, 0, excludedUploader)
-  }
 }
 
 function updateUploaderStatus() {
@@ -233,7 +276,7 @@ function updateUploaderStatus() {
   })
 
   // 使用统一的排序逻辑
-  sortUploaderList(null)
+  sortUploaderList(selectedUploader.value)
 }
 
 function applyRecordedUploaderTimes() {
@@ -275,6 +318,132 @@ const displayedUploaderList = computed(() => {
   return list
 })
 
+const uploaderRows = computed<UploaderRow[]>(() => {
+  if (settings.value.followingUploaderSort !== 'group' || !followingGroupsLoaded.value) {
+    return displayedUploaderList.value.map(uploader => ({
+      key: `uploader-${uploader.mid}`,
+      type: 'uploader',
+      uploader,
+    }))
+  }
+
+  // 先保留完整的分组结构，再过滤成员，以区分空分组与没有搜索命中的分组。
+  const groups = groupFollowingUploaders(uploaderList.value, followingGroups.value, (id) => {
+    if (id === 0)
+      return t('home.following_default_group')
+    if (id === -10)
+      return t('home.following_special_group')
+    if (id === WHISPER_GROUP_ID)
+      return t('home.following_whisper_group')
+    return t('home.following_group_name', { id })
+  })
+  const keyword = searchKeyword.value.trim().toLowerCase()
+  const searching = Boolean(keyword)
+  return groups.flatMap((group): UploaderRow[] => {
+    const members = searching
+      ? group.uploaders.filter(uploader => uploader.name.toLowerCase().includes(keyword))
+      : group.uploaders
+    // 真正的空分组始终显示，便于新建后立即看到并管理。
+    if (searching && group.uploaders.length > 0 && members.length === 0)
+      return []
+    const expanded = searching || expandedGroupIds.value.includes(group.tagid)
+    return [
+      {
+        key: `group-${group.tagid}`,
+        type: 'group',
+        id: group.tagid,
+        name: group.name,
+        count: members.length,
+        expanded,
+      },
+      ...(expanded
+        ? members.map(uploader => ({
+            key: `group-${group.tagid}-uploader-${uploader.mid}`,
+            type: 'uploader' as const,
+            uploader,
+          }))
+        : []),
+    ]
+  })
+})
+
+function toggleGroup(id: number) {
+  expandedGroupIds.value = expandedGroupIds.value.includes(id)
+    ? expandedGroupIds.value.filter(groupId => groupId !== id)
+    : [...expandedGroupIds.value, id]
+}
+
+function handleUploaderUnfollowed(mid: number) {
+  changedUploaderMids.add(mid)
+  uploaderList.value = uploaderList.value.filter(uploader => uploader.mid !== mid)
+  if (selectedUploader.value === mid)
+    selectUploader(null)
+}
+
+function handleUploaderGroupsChanged(mid: number, groupIds: number[]) {
+  changedUploaderMids.add(mid)
+  const uploader = uploaderList.value.find(uploader => uploader.mid === mid)
+  const addedGroupIds = groupIds.filter(id => id !== WHISPER_GROUP_ID && !uploader?.groupIds.includes(id))
+  if (uploader)
+    uploader.groupIds = groupIds
+  // 只展开新加入的分组；设置特别关注不应同时展开原有的普通分组。
+  expandedGroupIds.value = [...new Set([...expandedGroupIds.value, ...addedGroupIds])]
+}
+
+function handleFollowingGroupsLoaded(groups: FollowingGroup[]) {
+  followingGroups.value = groups
+  followingGroupsLoaded.value = true
+  groupsRequestFailed.value = false
+}
+
+function handleGroupCreated(group: FollowingGroup) {
+  followingGroups.value.push(group)
+}
+
+function handleGroupRenamed(id: number, name: string) {
+  const group = followingGroups.value.find(group => group.tagid === id)
+  if (group)
+    group.name = name
+}
+
+function handleGroupDeleted(id: number) {
+  followingGroups.value = followingGroups.value.filter(group => group.tagid !== id)
+  expandedGroupIds.value = expandedGroupIds.value.filter(groupId => groupId !== id)
+  for (const uploader of uploaderList.value) {
+    if (uploader.groupIds.includes(id))
+      uploader.groupIds = getFollowingGroupIds(uploader.groupIds.filter(groupId => groupId !== id), 0)
+  }
+}
+
+async function loadFollowingGroups(force = false) {
+  if (!tabState.isCurrent() || groupsLoading.value || (followingGroupsLoaded.value && !force))
+    return
+  groupsLoading.value = true
+  groupsRequestFailed.value = false
+  try {
+    const response: FollowingGroupsResult = await api.user.getFollowingGroups()
+    if (!tabState.isCurrent())
+      return
+    if (response.code !== 0 || !Array.isArray(response.data))
+      throw new Error(response.message || 'Failed to load following groups')
+    followingGroups.value = response.data
+    followingGroupsLoaded.value = true
+  }
+  catch (error) {
+    if (tabState.isCurrent())
+      groupsRequestFailed.value = true
+    console.error('[Following] Failed to load following groups:', error)
+  }
+  finally {
+    groupsLoading.value = false
+  }
+}
+
+watch(() => settings.value.followingUploaderSort, (sort) => {
+  if (sort === 'group')
+    void loadFollowingGroups(true)
+})
+
 const gridKey = computed(() => `following-grid-${selectedUploader.value ?? 'all'}`)
 
 // 获取当前用户信息以获取关注列表
@@ -292,6 +461,70 @@ async function getCurrentUserInfo() {
     console.error('[Following] Failed to get current user info:', error)
   }
   return 0
+}
+
+function mapFollowingUploader(user: FollowingRelationUser, whisper = user.attribute === 1): UploaderInfo {
+  const recordedTime = uploaderLatestVideoTimes.value[String(user.mid)]
+  const hasPostTime = Boolean(recordedTime)
+  const lastUpdateTime = recordedTime?.time ?? Number(user.mtime || 0) * 1000
+  return {
+    mid: user.mid,
+    name: user.uname,
+    face: user.face,
+    hasUpdate: false, // 合并后由 updateUploaderStatus 统一计算已读状态。
+    hasPostTime,
+    lastUpdateTime,
+    groupIds: whisper ? [WHISPER_GROUP_ID] : getFollowingGroupIds(user.tag, user.special),
+  }
+}
+
+async function loadWhisperFollowings() {
+  if (!tabState.isCurrent() || whispersLoading.value || whispersLoaded.value)
+    return
+  whispersLoading.value = true
+  whispersRequestFailed.value = false
+  try {
+    await uploaderLatestVideoTimesReady
+    const pageSize = 50
+    const seenMids = new Set<number>()
+    while (tabState.isCurrent()) {
+      const response: WhisperFollowingsResult = await api.user.getWhisperFollowings({ pn: whispersPage.value, ps: pageSize })
+      if (!tabState.isCurrent())
+        return
+      if (response.code !== 0 || !response.data || (response.data.list !== null && !Array.isArray(response.data.list)))
+        throw new Error(response.message || t('common.load_failed'))
+      const users = response.data.list ?? []
+      if (users.length > 0 && users.every(user => seenMids.has(user.mid)))
+        throw new Error(t('common.load_failed'))
+      const existing = new Map(uploaderList.value.map(uploader => [uploader.mid, uploader]))
+      for (const user of users) {
+        seenMids.add(user.mid)
+        if (changedUploaderMids.has(user.mid))
+          continue
+        const uploader = existing.get(user.mid)
+        if (uploader)
+          uploader.groupIds = [WHISPER_GROUP_ID]
+        else
+          existing.set(user.mid, mapFollowingUploader(user, true))
+      }
+      uploaderList.value = [...existing.values()]
+      updateUploaderStatus()
+      const total = response.data.total
+      if (users.length < pageSize || (typeof total === 'number' && whispersPage.value * pageSize >= total)) {
+        whispersLoaded.value = true
+        break
+      }
+      whispersPage.value++
+    }
+  }
+  catch (error) {
+    if (tabState.isCurrent())
+      whispersRequestFailed.value = true
+    console.error('[Following] Failed to load whisper followings:', error)
+  }
+  finally {
+    whispersLoading.value = false
+  }
 }
 
 // 加载关注列表（独立API）- 渐进式加载所有关注的UP主
@@ -316,7 +549,6 @@ async function loadFollowingList() {
       return
     const pageSize = 50
     let hasMore = true
-    const viewed = getViewedUploaders()
     const recordedTimes = uploaderLatestVideoTimes.value
 
     // 持续加载所有关注的UP主，每页加载后立即显示
@@ -342,24 +574,11 @@ async function loadFollowingList() {
         const followings = response.data.list
 
         // 立即处理并追加当前页的UP主到列表
-        const newUploaders = followings.map((user: any) => {
-          const recordedTime = recordedTimes[String(user.mid)]
-          const hasPostTime = Boolean(recordedTime)
-          const followedAt = Number(user.mtime || 0) * 1000
-          const lastUpdateTime = recordedTime?.time ?? followedAt
-          const viewedTime = viewed[user.mid] || 0
+        const existingMids = new Set(uploaderList.value.map(uploader => uploader.mid))
+        const newUploaders = followings
+          .filter((user: FollowingRelationUser) => !existingMids.has(user.mid) && !changedUploaderMids.has(user.mid))
+          .map((user: FollowingRelationUser) => mapFollowingUploader(user))
 
-          return {
-            mid: user.mid,
-            name: user.uname,
-            face: user.face,
-            hasUpdate: hasPostTime && calculateHasUpdate(lastUpdateTime, viewedTime),
-            hasPostTime,
-            lastUpdateTime,
-          }
-        })
-
-        // 立即追加到列表并排序
         uploaderList.value = [...uploaderList.value, ...newUploaders]
         updateUploaderStatus()
 
@@ -367,7 +586,7 @@ async function loadFollowingList() {
 
         // 检查是否还有更多
         const total = response.data.total
-        if (uploaderList.value.length >= total || followings.length < pageSize) {
+        if (followingPage.value * pageSize >= total || followings.length < pageSize) {
           hasMore = false
           followingListLoaded.value = true
           console.log('[Following] All followings loaded. Total:', uploaderList.value.length)
@@ -657,9 +876,11 @@ async function loadUserMoments(mid: number, maxPages: number = 3, token?: number
   emit('beforeLoading')
   isLoading.value = true
   requestFailed.value = false
+  const pinScrollToStart = videoList.value.length === 0
 
   // 收集本次点击后实际加载到的视频时间
   const allVideoTimes: number[] = []
+  const loadedIds = new Set(videoList.value.map(video => video.uniqueId))
 
   try {
     let tempOffset = userMomentsOffset.value || undefined
@@ -691,21 +912,16 @@ async function loadUserMoments(mid: number, maxPages: number = 3, token?: number
 
       if (response.code === 0) {
         const newOffset = response.data.offset
+        const items = response.data.items || []
+        // 末页仍可能包含视频，先消费数据再结束分页；不能仅靠 offset 判断。
+        const reachedEnd = !response.data.has_more || !newOffset || newOffset === '0'
+          || newOffset === tempOffset || items.length === 0
 
-        if (newOffset === '0' || newOffset === tempOffset || !response.data.items || response.data.items.length === 0) {
-          noMoreContent.value = true
-          console.log('[Following] No more content for this UP')
-          break
-        }
-        else {
-          tempOffset = newOffset
-          userMomentsOffset.value = newOffset
-        }
-
-        // 收集所有视频动态用于显示
-        const allVideoItems: { item: MomentItem, time: number }[] = []
-
-        response.data.items.forEach((item: MomentItem) => {
+        items.forEach((item: MomentItem) => {
+          const uniqueId = `user-moment-${item.id_str}`
+          // 置顶或分页重叠可能重复返回动态，重复 key 会破坏卡片窗口的滚动锚点。
+          if (loadedIds.has(uniqueId))
+            return
           // 只处理包含视频的动态（投稿 archive / 合集订阅 ugc_season）
           const major = item.modules?.module_dynamic?.major
           if (!major?.archive && !major?.ugc_season) {
@@ -741,19 +957,27 @@ async function loadUserMoments(mid: number, maxPages: number = 3, token?: number
             const time = item.modules.module_author.pub_ts * 1000
 
             videoList.value.push({
-              uniqueId: `user-moment-${item.id_str}`,
+              uniqueId,
               bvid: major.archive?.bvid || major.ugc_season?.bvid,
               item,
               authorList: authors,
               displayData,
             })
 
-            allVideoItems.push({ item, time })
+            loadedIds.add(uniqueId)
             allVideoTimes.push(time) // 收集所有视频时间
           }
         })
 
         console.log(`[Following] User moments page ${pageCount} loaded. Total:`, videoList.value.length)
+        if (pinScrollToStart)
+          pinFeedScrollToStart()
+        if (reachedEnd) {
+          noMoreContent.value = true
+          break
+        }
+        tempOffset = newOffset
+        userMomentsOffset.value = newOffset
       }
       else {
         console.error('[Following] API returned error code:', response.code)
@@ -802,10 +1026,9 @@ async function loadUserMoments(mid: number, maxPages: number = 3, token?: number
 
     console.log('[Following] User moments loading complete. Total:', videoList.value.length, 'videos')
 
-    // 如果一条视频都没加载到，设置 noMoreContent
-    if (videoList.value.length === 0) {
+    // 初始加载后如果没有任何视频，结束分页，避免空列表触底把全部历史刷完。
+    if (videoList.value.length === 0)
       noMoreContent.value = true
-    }
   }
   catch (error) {
     if (!tabState.isCurrent() || (token !== undefined && token !== selectionToken.value))
@@ -820,6 +1043,8 @@ async function loadUserMoments(mid: number, maxPages: number = 3, token?: number
       hasLoaded.value = true
       isLoading.value = false
       emit('afterLoading')
+      if (pinScrollToStart)
+        pinFeedScrollToStart()
     }
   }
 }
@@ -834,12 +1059,8 @@ function selectUploader(mid: number | null) {
   // 生成新的选择令牌，用于防止竞态条件
   const currentToken = ++selectionToken.value
 
-  // 即时滚动到顶部（或搜索页面模式下的偏移位置）
-  const viewport = scrollViewportRef.value
-  if (viewport) {
-    const scrollTarget = settings.value.useSearchPageModeOnHomePage ? 510 : 0
-    viewport.scrollTop = scrollTarget
-  }
+  // 停留在信息流起始位置加载，避免短列表持续触底把视口带到底部。
+  pinFeedScrollToStart()
 
   // 重置视频列表和分页状态
   videoList.value = []
@@ -855,6 +1076,7 @@ function selectUploader(mid: number | null) {
 
     selectedUploader.value = null
     previousSelectedUploader.value = null
+    suppressUploaderAutoLoadMore.value = false
 
     // 重置ALL视图分页和直播加载标志
     allViewOffset.value = ''
@@ -876,6 +1098,7 @@ function selectUploader(mid: number | null) {
 
     selectedUploader.value = mid
     previousSelectedUploader.value = mid
+    suppressUploaderAutoLoadMore.value = true
 
     // 重置用户动态分页
     userMomentsOffset.value = ''
@@ -971,6 +1194,8 @@ async function handleLoadMore() {
     return
   if (isLoading.value || noMoreContent.value)
     return
+  if (suppressUploaderAutoLoadMore.value && selectedUploader.value !== null)
+    return
 
   console.log('[Following] Loading more...')
 
@@ -1009,11 +1234,13 @@ function initData() {
   // 如果当前已经选中了某个UP主，刷新该UP主的动态
   if (currentSelectedUploader !== null) {
     console.log('[Following] Refreshing moments for UP', currentSelectedUploader)
+    suppressUploaderAutoLoadMore.value = true
+    pinFeedScrollToStart()
     loadUserMoments(currentSelectedUploader, 3, selectionToken.value)
   }
   else {
     // 否则，先加载关注列表，然后加载ALL视图
-    if (uploaderList.value.length === 0) {
+    if (!followingListLoaded.value) {
       // 设置加载状态，避免显示"没有数据"
       isLoading.value = true
       emit('beforeLoading')
@@ -1044,8 +1271,12 @@ function jumpToLoginPage() {
 }
 
 onMounted(() => {
+  emitter.on(OVERLAY_SCROLL_BAR_SCROLL, handleFeedScroll)
   if (!tabState.isCurrent())
     return
+  if (settings.value.followingUploaderSort === 'group')
+    void loadFollowingGroups(true)
+  void loadWhisperFollowings()
   if (uploaderScrollRef.value)
     uploaderScrollRef.value.scrollTop = tabState.read('uploaderScrollTop', 0)
   isRefreshContextActive.value = true
@@ -1057,15 +1288,21 @@ onMounted(() => {
   }
   if (!followingListLoaded.value && !needToLoginFirst.value)
     void loadFollowingList()
+  if (selectedUploader.value !== null)
+    suppressUploaderAutoLoadMore.value = true
   if (!hasLoaded.value && videoList.value.length === 0) {
-    if (selectedUploader.value === null)
+    if (selectedUploader.value === null) {
       void loadAllViewVideos(3, selectionToken.value)
-    else
+    }
+    else {
+      pinFeedScrollToStart()
       void loadUserMoments(selectedUploader.value, 3, selectionToken.value)
+    }
   }
 })
 
 onBeforeUnmount(() => {
+  emitter.off(OVERLAY_SCROLL_BAR_SCROLL, handleFeedScroll)
   selectionToken.value++
   isRefreshContextActive.value = false
   if (tabState.isActiveTab())
@@ -1090,14 +1327,12 @@ defineExpose({ initData })
 </script>
 
 <template>
-  <div flex="~ gap-40px">
+  <div class="following-layout" flex="~ gap-40px">
     <!-- Left Panel: Uploader List -->
-    <aside
-      pos="sticky top-150px" h="[calc(100vh-140px)]" w-200px shrink-0 duration-300
-      ease-in-out
-    >
+    <aside class="uploader-sidebar" w-200px shrink-0>
       <div
         ref="uploaderScrollRef" h-inherit p="x-20px b-20px t-8px" m--20px of-y-auto
+        class="uploader-scroll"
         of-x-hidden
       >
         <!-- Search Box -->
@@ -1119,11 +1354,38 @@ defineExpose({ initData })
           >
         </div>
 
+        <div
+          v-if="settings.followingUploaderSort === 'group' && (groupsLoading || groupsRequestFailed)"
+          class="group-status"
+          aria-live="polite"
+        >
+          <span v-if="groupsLoading">{{ $t('common.loading') }}</span>
+          <template v-else-if="groupsRequestFailed">
+            <span>{{ $t('home.following_groups_load_failed') }}</span>
+            <button type="button" class="group-retry" @click="loadFollowingGroups(true)">
+              {{ $t('home.following_groups_retry') }}
+            </button>
+          </template>
+        </div>
+
+        <div v-if="whispersLoading || whispersRequestFailed" class="group-status" aria-live="polite">
+          <span v-if="whispersLoading">{{ $t('home.following_whispers_loading') }}</span>
+          <template v-else>
+            <span>{{ $t('home.following_whispers_load_failed') }}</span>
+            <button type="button" class="group-retry" @click="loadWhisperFollowings">
+              {{ $t('home.following_groups_retry') }}
+            </button>
+          </template>
+        </div>
+
         <!-- 分组一次可能移除数百个成员，直接更新列表，避免退出动画的绝对定位行覆盖其他按钮。 -->
         <ul flex="~ col gap-2">
           <!-- All Uploaders Option -->
           <li key="all-uploaders">
-            <a
+            <button
+              type="button"
+              class="uploader-button"
+              :aria-pressed="selectedUploader === null"
               :class="{ active: selectedUploader === null }"
               px-4 py-2 hover:bg="$bew-fill-2" w-inherit
               block rounded="$bew-radius" cursor-pointer transition="background-color duration-200, color duration-200, box-shadow duration-200"
@@ -1142,33 +1404,57 @@ defineExpose({ initData })
                 <div font-medium text-sm>
                   {{ $t('topbar.moments_dropdown.tabs.all') }}
                 </div>
-                <div v-if="unreadUploadersCount > 0" class="secondary-text">
+                <div
+                  class="secondary-text"
+                  :style="{ visibility: unreadUploadersCount > 0 ? 'visible' : 'hidden' }"
+                >
                   {{ $t('home.uploaders_with_updates', { count: unreadUploadersCount }) }}
                 </div>
               </div>
-            </a>
+            </button>
           </li>
 
-          <!-- Individual Uploaders -->
-          <li v-for="uploader in displayedUploaderList" :key="uploader.mid">
-            <a
-              :class="{ active: selectedUploader === uploader.mid }"
+          <!-- Group headings and individual uploaders share one keyed list. -->
+          <li v-for="row in uploaderRows" :key="row.key">
+            <button
+              v-if="row.type === 'group'"
+              type="button"
+              class="uploader-group-heading"
+              aria-haspopup="menu"
+              :aria-expanded="row.expanded"
+              :disabled="Boolean(searchKeyword.trim())"
+              :title="row.name"
+              @click="toggleGroup(row.id)"
+              @contextmenu.prevent.stop="groupMenuRef?.open($event, row.id, row.name)"
+            >
+              <span :class="row.expanded ? 'i-mingcute:down-line' : 'i-mingcute:right-line'" aria-hidden="true" />
+              <span class="group-name">{{ row.name }}</span>
+              <span class="group-count">{{ row.count }}</span>
+            </button>
+            <button
+              v-else
+              type="button"
+              class="uploader-button"
+              aria-haspopup="menu"
+              :aria-pressed="selectedUploader === row.uploader.mid"
+              :class="{ active: selectedUploader === row.uploader.mid }"
               px-4 py-2 hover:bg="$bew-fill-2" w-inherit
               block rounded="$bew-radius" cursor-pointer transition="background-color duration-200, color duration-200, box-shadow duration-200"
               un-text="$bew-text-1"
               flex="~ items-center gap-3"
-              @click="selectUploader(uploader.mid)"
+              @click="selectUploader(row.uploader.mid)"
+              @contextmenu.prevent.stop="uploaderMenuRef?.open($event, row.uploader)"
             >
               <div pos="relative" shrink-0>
                 <img
-                  :src="`${uploader.face}@50w_50h`"
+                  :src="`${row.uploader.face}@50w_50h`"
                   w-30px h-30px rounded-full object-cover
                   loading="lazy"
                   alt="Avatar"
                 >
                 <!-- Red dot for new updates -->
                 <div
-                  v-if="uploader.hasUpdate"
+                  v-if="row.uploader.hasUpdate"
                   pos="absolute top-0 right-0"
                   w-8px h-8px rounded-full
                   bg="red-500" border="2 $bew-elevated"
@@ -1176,15 +1462,29 @@ defineExpose({ initData })
               </div>
               <div flex-1 overflow-hidden>
                 <div font-medium truncate text-sm>
-                  {{ uploader.name }}
+                  {{ row.uploader.name }}
                 </div>
                 <div class="secondary-text">
-                  {{ calcTimeSince(uploader.lastUpdateTime) }}
+                  {{ calcTimeSince(row.uploader.lastUpdateTime) }}
                 </div>
               </div>
-            </a>
+            </button>
+          </li>
+          <li v-if="settings.followingUploaderSort === 'group'" key="create-group">
+            <button
+              type="button"
+              class="uploader-group-heading create-group-button"
+              :disabled="!followingGroupsLoaded || groupsLoading"
+              @click="groupMenuRef?.create()"
+            >
+              <span class="i-mingcute:folder-add-line" aria-hidden="true" />
+              <span class="group-name">{{ $t('home.following_create_group') }}</span>
+            </button>
           </li>
         </ul>
+        <p v-if="searchKeyword.trim() && displayedUploaderList.length === 0" class="group-status" role="status">
+          {{ $t('common.no_data') }}
+        </p>
       </div>
     </aside>
 
@@ -1198,6 +1498,7 @@ defineExpose({ initData })
         :no-more-content="noMoreContent"
         :need-to-login-first="needToLoginFirst"
         :request-failed="requestFailed"
+        :show-loading-more-skeleton="selectedUploader === null"
         :transform-item="transformVideoItem"
         :get-item-key="(item: VideoElement) => item.uniqueId"
         :show-watcher-later="false"
@@ -1208,10 +1509,124 @@ defineExpose({ initData })
         @load-more="handleLoadMore"
       />
     </div>
+    <FollowingUploaderMenu
+      ref="uploaderMenuRef"
+      @unfollowed="handleUploaderUnfollowed"
+      @groups-changed="handleUploaderGroupsChanged"
+      @groups-loaded="handleFollowingGroupsLoaded"
+    />
+    <FollowingGroupMenu
+      ref="groupMenuRef"
+      @created="handleGroupCreated"
+      @renamed="handleGroupRenamed"
+      @deleted="handleGroupDeleted"
+    />
   </div>
 </template>
 
 <style lang="scss" scoped>
+.following-layout {
+  // 切换 UP 时视频网格会短暂清空。父容器仍需容纳侧栏高度与 sticky 顶部偏移，
+  // 否则 sticky 会被父容器底边推回文档流位置，造成整个侧栏先上移再下移。
+  min-height: calc(100vh - var(--bew-space-2));
+}
+
+.uploader-sidebar {
+  // sticky 顶部偏移与高度使用同一基准，避免侧栏底部越出视口后被回顶/焦点滚动纠正。
+  --following-sidebar-top: 150px;
+  position: sticky;
+  top: var(--following-sidebar-top);
+  align-self: flex-start;
+  height: calc(100vh - var(--following-sidebar-top) - var(--bew-space-2));
+}
+
+.uploader-scroll {
+  // 点击后的状态变化不应触发浏览器滚动锚定，滚动到边缘也不穿透到右侧信息流。
+  overflow-anchor: none;
+  overscroll-behavior-y: contain;
+}
+
+.group-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--bew-space-2);
+  color: var(--bew-text-2);
+  font-size: var(--bew-font-size-control);
+  line-height: var(--bew-line-height-control);
+
+  &:not(:empty) {
+    margin-bottom: var(--bew-space-3);
+  }
+}
+
+.uploader-button {
+  width: 100%;
+  text-align: start;
+}
+
+.uploader-group-heading,
+.group-retry {
+  display: flex;
+  align-items: center;
+  gap: var(--bew-space-2);
+  min-height: var(--bew-control-height);
+  padding: var(--bew-space-2);
+  border-radius: var(--bew-interactive-radius);
+  color: var(--bew-text-2);
+  font-size: var(--bew-font-size-control);
+  font-weight: var(--bew-font-weight-semibold);
+  line-height: var(--bew-line-height-control);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--bew-fill-2);
+    color: var(--bew-text-1);
+  }
+
+  &:active:not(:disabled) {
+    background: var(--bew-fill-3);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.create-group-button {
+  border: 1px dashed var(--bew-border-color);
+
+  &:hover:not(:disabled) {
+    border-color: var(--bew-theme-color);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.uploader-group-heading {
+  width: 100%;
+  text-align: start;
+
+  > :first-child {
+    flex-shrink: 0;
+    font-size: var(--bew-icon-size-sm);
+  }
+}
+
+.group-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-count {
+  flex-shrink: 0;
+}
+
 .secondary-text {
   --uno: "text-xs text-$bew-text-2";
 }

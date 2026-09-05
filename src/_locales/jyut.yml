@@ -104,6 +104,9 @@ player_screenshot:
   failed: 截圖失敗
   video_unavailable: 而家嘅影片畫面用唔到
 settings:
+  following_sort: 新版關注列表排序
+  following_sort_updated: 按更新時間
+  following_sort_group: 按分組
   title: 設定
   menu_general: 一般
   menu_bewly_pages: Bewly 頁面
@@ -1144,6 +1147,28 @@ video_card:
   watched: 睇過
   visited_recently: 近一個月內睇過
 home:
+  following_whisper_group: 悄悄關注
+  following_add_whisper: 加入悄悄關注
+  following_remove_whisper: 移出悄悄關注
+  following_remove_whisper_confirm: '確定將「{name}」移出悄悄關注？移出後會取消對呢個 UP 主嘅悄悄關注。'
+  following_whispers_loading: 載入緊悄悄關注…
+  following_whispers_load_failed: 悄悄關注載入失敗，列表可能唔完整
+  following_default_group: 預設分組
+  following_special_group: 特別關注
+  following_group_name: '分組 {id}'
+  following_groups_load_failed: 分組載入失敗，暫按更新時間顯示
+  following_groups_retry: 再試
+  following_move_group: 移動分組
+  following_remove_special: 取消特別關注
+  following_add_special: 設為特別關注
+  following_create_group: 新增分組
+  following_rename_group: 改分組名
+  following_delete_group: 刪除分組
+  following_group_name_label: 分組名稱（1–16 個字元）
+  following_group_name_invalid: 請輸入 1–16 個字元嘅分組名稱
+  following_delete_group_confirm: '確定刪除分組「{name}」？唔會取消關注入面嘅 UP 主；冇其他普通分組嘅 UP 主會放返預設分組。'
+  following_action_success: '已更新對 {name} 嘅關注設定'
+  following_action_failed: '操作失敗：{message}'
   app_authorization_required: App 模式嘅 access token 已經遺失或者過期，請重新授權之後再繼續使用個人化推介
   reauthorize_app: 重新授權
   recommendation_filter_risk_warning: 而家嘅過濾條件喺 {total} 條有效推介入面淨係留低 {count} 條，容易造成頻繁請求並觸發接口風控，建議放寬過濾條件。

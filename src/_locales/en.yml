@@ -104,6 +104,9 @@ player_screenshot:
   failed: Failed to capture screenshot
   video_unavailable: The current video frame is unavailable
 settings:
+  following_sort: Uploader order in the new Following layout
+  following_sort_updated: By update time
+  following_sort_group: By group
   title: Settings
   menu_general: General
   menu_bewly_pages: Bewly Pages
@@ -1226,6 +1229,28 @@ video_card:
   watched: Watched
   visited_recently: Visited within the past month
 home:
+  following_whisper_group: Private follows
+  following_add_whisper: Follow privately
+  following_remove_whisper: Remove private follow
+  following_remove_whisper_confirm: 'Remove the private follow for {name}? You will stop privately following this uploader.'
+  following_whispers_loading: Loading private follows…
+  following_whispers_load_failed: Could not load private follows. The list may be incomplete.
+  following_default_group: Default group
+  following_special_group: Special follows
+  following_group_name: 'Group {id}'
+  following_groups_load_failed: Could not load groups. Showing uploaders by update time.
+  following_groups_retry: Retry
+  following_move_group: Move to group
+  following_remove_special: Remove from special follows
+  following_add_special: Add to special follows
+  following_create_group: Create group
+  following_rename_group: Rename group
+  following_delete_group: Delete group
+  following_group_name_label: Group name (1–16 characters)
+  following_group_name_invalid: Enter a group name with 1–16 characters
+  following_delete_group_confirm: 'Delete “{name}”? You will still follow its uploaders. Uploaders with no other regular group will appear in the default group.'
+  following_action_success: 'Updated following settings for {name}'
+  following_action_failed: 'Operation failed: {message}'
   app_authorization_required: The App mode access token is missing or expired. Re-authorize to continue using personalized recommendations.
   reauthorize_app: Re-authorize
   recommendation_filter_risk_warning: The current filters retained only {count} of {total} valid recommendations. This may cause frequent requests and trigger API risk control. Consider relaxing the filters.

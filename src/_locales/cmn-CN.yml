@@ -104,6 +104,9 @@ player_screenshot:
   failed: 截图失败
   video_unavailable: 当前视频画面不可用
 settings:
+  following_sort: 新版关注列表排序
+  following_sort_updated: 按更新时间
+  following_sort_group: 按分组
   title: 设置
   menu_general: 通用
   menu_bewly_pages: Bewly 页面
@@ -1129,6 +1132,28 @@ video_card:
   watched: 已观看
   visited_recently: 近一个月内浏览过
 home:
+  following_whisper_group: 悄悄关注
+  following_add_whisper: 加入悄悄关注
+  following_remove_whisper: 移出悄悄关注
+  following_remove_whisper_confirm: '确定将「{name}」移出悄悄关注吗？移出后将取消对该 UP 主的悄悄关注。'
+  following_whispers_loading: 正在加载悄悄关注…
+  following_whispers_load_failed: 悄悄关注加载失败，列表可能不完整
+  following_default_group: 默认分组
+  following_special_group: 特别关注
+  following_group_name: '分组 {id}'
+  following_groups_load_failed: 分组加载失败，暂按更新时间展示
+  following_groups_retry: 重试
+  following_move_group: 移动分组
+  following_remove_special: 取消特别关注
+  following_add_special: 设为特别关注
+  following_create_group: 新建分组
+  following_rename_group: 重命名分组
+  following_delete_group: 删除分组
+  following_group_name_label: 分组名称（1–16 个字符）
+  following_group_name_invalid: 请输入 1–16 个字符的分组名称
+  following_delete_group_confirm: '确定删除分组「{name}」吗？不会取消关注其中的 UP 主；没有其他普通分组的 UP 主将归入默认分组。'
+  following_action_success: '已更新对 {name} 的关注设置'
+  following_action_failed: '操作失败：{message}'
   app_authorization_required: App 模式的 access token 已缺失或过期，请重新授权后继续使用个性推荐
   reauthorize_app: 重新授权
   recommendation_filter_risk_warning: 当前过滤条件在 {total} 条有效推荐中仅保留了 {count} 条，容易频繁请求并触发接口风控，建议适当放宽过滤条件。
