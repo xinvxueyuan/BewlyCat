@@ -1,7 +1,30 @@
 import type { InjectionKey, Ref } from 'vue'
-import { inject, onBeforeUnmount, provide, reactive, ref } from 'vue'
+import { inject, onBeforeUnmount, provide, reactive, ref, toRaw } from 'vue'
 
 type TabSnapshot = Record<string, unknown>
+
+/** Copy registered JSON data from raw values, without proxy traversal or a JSON string buffer. */
+function cloneTabData<T>(value: T, copies = new WeakMap<object, unknown>()): T {
+  if (value === null || typeof value !== 'object')
+    return value
+
+  const raw = toRaw(value)
+  if (copies.has(raw))
+    return copies.get(raw) as T
+
+  const copy = (Array.isArray(raw) ? Array.from({ length: raw.length }) : {}) as Record<string, unknown>
+  copies.set(raw, copy)
+  for (const key of Object.keys(raw)) {
+    const field = cloneTabData((raw as Record<string, unknown>)[key], copies)
+    if (key === '__proto__') {
+      Object.defineProperty(copy, key, { value: field, writable: true, enumerable: true, configurable: true })
+    }
+    else {
+      copy[key] = field
+    }
+  }
+  return copy as T
+}
 
 /** The cache owns JSON data only, never component instances, refs or DOM nodes. */
 export function createHomeTabCache() {
@@ -16,7 +39,7 @@ export function createHomeTabCache() {
     },
     save(key: string, snapshot: TabSnapshot, version: number) {
       if (version === generation)
-        snapshots.set(key, JSON.parse(JSON.stringify(snapshot)))
+        snapshots.set(key, cloneTabData(snapshot))
     },
     clear() {
       generation++
@@ -58,7 +81,7 @@ export function useHomeTabState() {
     return () => {
       if (disposed || fields.get(key) !== getValue)
         return
-      const value = JSON.parse(JSON.stringify({ value: getValue() })).value
+      const value = cloneTabData(getValue())
       fields.set(key, () => value)
     }
   }
@@ -100,7 +123,7 @@ export function useHomeTabState() {
   provide(homeTabStateKey, state)
   onBeforeUnmount(() => {
     disposed = true
-    if (context)
+    if (context && context.cache.generation === generation)
       context.cache.save(ownerKey, Object.fromEntries([...fields].map(([key, getValue]) => [key, getValue()])), generation)
     fields.clear()
   })
