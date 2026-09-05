@@ -34,6 +34,7 @@ import { useTopBarStore } from '~/stores/topBarStore'
 import api from '~/utils/api'
 import { numFormatter } from '~/utils/dataFormatter'
 import { getCSRF } from '~/utils/main'
+import { MasonryColumnMetrics } from '~/utils/masonryColumnMetrics'
 import { resolvePgcEpisodeVideoIds } from '~/utils/pgcEpisode'
 import { openLinkInBackground } from '~/utils/tabs'
 import { recordVideoVisit } from '~/utils/videoVisitHistory'
@@ -257,6 +258,8 @@ interface VirtualColumn {
   items: DisplayMoment[]
 }
 const virtualColumns = ref<VirtualColumn[]>([])
+let columnMetrics: MasonryColumnMetrics[] = []
+const cardMetricPositions = new Map<string, { column: number, index: number }>()
 /** 单图宽高比（宽/高），用于图文卡片比例和详情视频的封面比例兜底 */
 const coverRatios = reactive<Record<string, number>>({})
 
@@ -305,6 +308,7 @@ let lastScrollAt = 0
 /** 重置后尚未滚动时不自动连刷，避免首屏连打多页才出内容 */
 let hasFeedScrollSinceReset = false
 let virtualRaf = 0
+let isMomentsDisposed = false
 let feedRequestToken = 0
 let portalRequestToken = 0
 let suppressBottomRebalanceUntil = 0
@@ -2399,6 +2403,7 @@ function redistributeColumns() {
   })
 
   momentColumns.value = balanceColumnBottoms(next).columns
+  rebuildColumnMetrics()
   updateVirtualColumns()
 }
 
@@ -2458,10 +2463,13 @@ function updateGridColumnCount() {
   gridColumnCount.value = nextCols
   gridCardWidth.value = nextCardWidth
 
-  if (colsChanged || needInitColumns)
+  if (colsChanged || needInitColumns) {
     redistributeColumns()
-  else if (widthChanged)
+  }
+  else if (widthChanged) {
+    rebuildColumnMetrics()
     updateVirtualColumns()
+  }
 }
 
 function appendMoments(items: DisplayMoment[]) {
@@ -2487,6 +2495,7 @@ function appendMoments(items: DisplayMoment[]) {
   // 初始布局可整体平衡；分页只追加，不能搬动用户正在查看的旧卡片
   if (wasEmpty)
     momentColumns.value = balanceColumnBottoms(momentColumns.value).columns
+  rebuildColumnMetrics()
   updateVirtualColumns()
   scheduleBottomRebalance()
   return appended
@@ -2533,6 +2542,7 @@ function scheduleBottomRebalance() {
     const balanced = balanceColumnBottoms(momentColumns.value)
     if (balanced.changed) {
       momentColumns.value = balanced.columns
+      rebuildColumnMetrics()
       updateVirtualColumns()
     }
   }, 720)
@@ -2548,6 +2558,9 @@ function commitCardHeight(id: string, next: number, options?: { force?: boolean 
     return false
 
   cardHeights[id] = next
+  const position = cardMetricPositions.get(id)
+  if (position)
+    columnMetrics[position.column]?.set(position.index, next)
   // 连续两次接近的高度视为稳定，后续忽略小幅 Resize 抖动
   if (prev > 0 && Math.abs(next - prev) < 24)
     settledHeights.add(id)
@@ -2558,7 +2571,7 @@ function commitCardHeight(id: string, next: number, options?: { force?: boolean 
 }
 
 function scheduleVirtualUpdate() {
-  if (virtualRaf)
+  if (isMomentsDisposed || virtualRaf)
     return
   virtualRaf = window.requestAnimationFrame(() => {
     virtualRaf = 0
@@ -2599,7 +2612,23 @@ function getGridOffsetTop() {
   return gridRect.top - viewportRect.top + viewport.scrollTop
 }
 
+function rebuildColumnMetrics() {
+  if (isMomentsDisposed)
+    return
+  cardMetricPositions.clear()
+  columnMetrics = momentColumns.value.map((column, columnIndex) => {
+    const metrics = new MasonryColumnMetrics()
+    metrics.reset(column.map((moment, index) => {
+      cardMetricPositions.set(moment.id, { column: columnIndex, index })
+      return getCardHeight(moment)
+    }), GRID_GAP)
+    return metrics
+  })
+}
+
 function updateVirtualColumns() {
+  if (isMomentsDisposed)
+    return
   if (!momentColumns.value.length) {
     virtualColumns.value = []
     return
@@ -2609,35 +2638,23 @@ function updateVirtualColumns() {
   const scrollTop = viewport?.scrollTop ?? 0
   const viewportHeight = viewport?.clientHeight ?? window.innerHeight
   const gridOffsetTop = getGridOffsetTop()
-  const viewStart = scrollTop - OVERSCAN_PX
-  const viewEnd = scrollTop + viewportHeight + OVERSCAN_PX
-  const gap = GRID_GAP
+  const viewStart = scrollTop - gridOffsetTop - OVERSCAN_PX
+  const viewEnd = scrollTop - gridOffsetTop + viewportHeight + OVERSCAN_PX
 
-  virtualColumns.value = momentColumns.value.map((column) => {
-    let y = 0
-    let topPad = 0
-    let bottomPad = 0
-    const items: DisplayMoment[] = []
-
-    column.forEach((moment) => {
-      const height = getCardHeight(moment)
-      const start = gridOffsetTop + y
-      const end = start + height
-      if (end < viewStart) {
-        topPad += height + gap
-      }
-      else if (start > viewEnd) {
-        bottomPad += height + gap
-      }
-      else {
-        items.push(moment)
-      }
-      y += height + gap
-    })
-
-    // spacer 与相邻卡片之间已有 CSS gap，只保留隐藏段内部的间距。
-    return { topPad: Math.max(0, topPad - gap), bottomPad: Math.max(0, bottomPad - gap), items }
+  const previous = virtualColumns.value
+  const next = momentColumns.value.map((column, columnIndex) => {
+    const { start, end, topPad, bottomPad } = columnMetrics[columnIndex].getWindow(viewStart, viewEnd)
+    return { topPad, bottomPad, items: column.slice(start, end) }
   })
+  // 滚动尚未跨卡片边界时复用窗口，避免每帧触发卡片 patch / ref 回调与测量。
+  if (next.length !== previous.length || next.some((column, index) => {
+    const old = previous[index]
+    return column.topPad !== old.topPad || column.bottomPad !== old.bottomPad
+      || column.items.length !== old.items.length
+      || column.items.some((moment, itemIndex) => moment !== old.items[itemIndex])
+  })) {
+    virtualColumns.value = next
+  }
 
   prunePreviewCache()
 }
@@ -2758,7 +2775,7 @@ function bindCardEl(el: Element | null, moment: DisplayMoment) {
     })
   }
   else if (!cardHeights[moment.id]) {
-    cardHeights[moment.id] = estimateCardHeight(moment)
+    commitCardHeight(moment.id, estimateCardHeight(moment), { force: true })
   }
 }
 
@@ -3310,6 +3327,8 @@ async function loadMoments(reset = false, autoFillDepth = 0, manualPaging = fals
     wantedFeedBuffer = undefined
     moments.value = []
     momentColumns.value = []
+    columnMetrics = []
+    cardMetricPositions.clear()
     virtualColumns.value = []
     Object.keys(cardHeights).forEach(key => delete cardHeights[key])
     Object.keys(previewUrls).forEach(key => delete previewUrls[key])
@@ -3833,6 +3852,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  isMomentsDisposed = true
   feedRequestToken += 1
   wantedFeedBuffer = undefined
   gridObserver?.disconnect()
@@ -3850,6 +3870,8 @@ onBeforeUnmount(() => {
   videoAspectRatioRequests.clear()
   visibleMomentIds.clear()
   cardElements.clear()
+  columnMetrics = []
+  cardMetricPositions.clear()
   cardEnterTimers.forEach(timer => clearTimeout(timer))
   cardEnterTimers.clear()
   clearDetailLoadTimer()
@@ -3914,6 +3936,7 @@ watch(
     settledHeights.clear()
     await nextTick()
     updateGridColumnCount()
+    rebuildColumnMetrics()
     updateVirtualColumns()
   },
 )
