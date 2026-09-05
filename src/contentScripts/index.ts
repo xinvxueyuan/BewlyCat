@@ -38,6 +38,7 @@ import { initBewlyWidescreenControl } from './bewlyWidescreenControl'
 import { setupIframePhotoViewerDetector } from './features/iframePhotoViewerDetector'
 import { setupNotificationStateInvalidation } from './features/notificationStateInvalidation'
 import { setupOpusDetailDrawerLayout } from './features/opusDetailDrawerLayout'
+import type { PageLoadingGuard } from './pageLoading'
 import { initTouchPlayerGestures } from './touchPlayerGestures'
 import { initVideoAspectRatioMemory } from './videoAspectRatioMemory'
 import { initVideoScreenshotControl } from './videoScreenshotControl'
@@ -56,6 +57,7 @@ function disposeBewlyHost(element: Element) {
 const contentScriptGlobal = globalThis as typeof globalThis & {
   __BEWLYCAT_BUNDLED_STYLE_TEXT__: string
   __BEWLYCAT_CONTENT_SCRIPT_INITIALIZED__?: boolean
+  __BEWLYCAT_PAGE_LOADING__?: PageLoadingGuard
 }
 const shouldInitializeContentScript = !contentScriptGlobal.__BEWLYCAT_CONTENT_SCRIPT_INITIALIZED__
 const bundledShadowStyleText = contentScriptGlobal.__BEWLYCAT_BUNDLED_STYLE_TEXT__
@@ -224,8 +226,6 @@ else if (shouldInitializeContentScript) {
     window.clearTimeout = window.clearTimeout.bind(window)
   }
 
-  let beforeLoadedStyleEl: HTMLStyleElement | undefined
-  let beforeLoadedStyleFailsafeTimer: ReturnType<typeof setTimeout> | undefined
   let lastUrl = location.href
   let lastVideoNavigationKey = getVideoNavigationKey(location.href)
   let lastAppliedPlayerModeNavigationKey: string | undefined
@@ -356,15 +356,7 @@ else if (shouldInitializeContentScript) {
     }
   })
 
-  // 挂载完成与保险丝两条路径共用的清理，重复调用无副作用
-  function removeBeforeLoadedStyleEl() {
-    beforeLoadedStyleEl?.remove()
-    beforeLoadedStyleEl = undefined
-    clearTimeout(beforeLoadedStyleFailsafeTimer)
-  }
-
   window.addEventListener(BEWLY_MOUNTED, () => {
-    removeBeforeLoadedStyleEl()
     // 根据设置应用默认播放器模式
     if (isVideoPage())
       applyDefaultPlayerMode()
@@ -1203,16 +1195,12 @@ else if (shouldInitializeContentScript) {
       restoreDefaultPlayerModeAfterPageResume()
   })
 
-  // Set the original Bilibili top bar to `display: none` to prevent it from showing before the load
-  // see: https://github.com/BewlyBewly/BewlyBewly/issues/967
-  const removeOriginalTopBar = injectCSS(`
-    .bili-header,
-    #biliMainHeader,
-    .header-channel,
-    .bili-header-channel-panel {
-      visibility: hidden !important;
-    }
-  `)
+  void settingsReady.then(() => {
+    if (settings.value.useOriginalBilibiliHomepage)
+      contentScriptGlobal.__BEWLYCAT_PAGE_LOADING__?.revealHomepage()
+    if (!isSupportedPages() && !isSupportedIframePages())
+      contentScriptGlobal.__BEWLYCAT_PAGE_LOADING__?.dispose()
+  })
 
   async function onDOMLoaded() {
     // 所有页面都先完成设置读取，避免启动期 watcher 基于默认值生成陈旧写入。
@@ -1223,21 +1211,6 @@ else if (shouldInitializeContentScript) {
 
     // 启用自定义首页时隐藏 B 站原始首页。
     if (changeHomePage) {
-      // 等真实设置就绪后，仅在外层自定义首页防闪烁。原生首页（含 iframe）
-      // 必须保留布局，否则 B 站初始化时会把悬浮工具栏算到视口外（#1178）。
-      if (settings.value.adaptToOtherPageStyles) {
-        beforeLoadedStyleEl = injectCSS(`
-          html.bewly-custom-homepage.bewly-design {
-            background-color: var(--bew-bg);
-          }
-          html.bewly-custom-homepage > body {
-            opacity: 0;
-            pointer-events: none;
-          }
-        `)
-        beforeLoadedStyleFailsafeTimer = setTimeout(removeBeforeLoadedStyleEl, 4000)
-      }
-
       // 移动端缺少 viewport 声明时会按 980px 排版后整体缩放，导致响应式断点失效。
       ensureResponsiveViewport(document)
 
@@ -1310,19 +1283,11 @@ else if (shouldInitializeContentScript) {
     */
     }
 
-    if (isSupportedPages() || isSupportedIframePages()) {
-    // Then inject the app
-      if (isHomePage()) {
-        injectApp()
-      }
-      else {
-        await injectAppWhenIdle()
-      }
-    }
+    // 首屏 UI 不等待空闲回调，否则繁忙页面会长时间保留原站外观。
+    if (isSupportedPages() || isSupportedIframePages())
+      injectApp()
 
-    // Reset the original Bilibili top bar display style
-    if (removeOriginalTopBar)
-      document.documentElement.removeChild(removeOriginalTopBar)
+    contentScriptGlobal.__BEWLYCAT_PAGE_LOADING__?.dispose()
 
     initVideoAspectRatioMemory()
     initVideoScreenshotControl()
@@ -1338,23 +1303,17 @@ else if (shouldInitializeContentScript) {
     initNativeFavoriteSeasonPlayAllIntercept()
   }
 
+  function initializePage() {
+    void onDOMLoaded().catch((error) => {
+      contentScriptGlobal.__BEWLYCAT_PAGE_LOADING__?.dispose()
+      console.error('[BewlyCat] 页面初始化失败:', error)
+    })
+  }
   if (document.readyState !== 'loading') {
-    void onDOMLoaded()
+    initializePage()
   }
   else {
-    document.addEventListener('DOMContentLoaded', () => {
-      void onDOMLoaded()
-    })
-  }
-
-  function injectAppWhenIdle() {
-    return new Promise<void>((resolve) => {
-    // Inject app when idle
-      runWhenIdle(async () => {
-        injectApp()
-        resolve()
-      })
-    })
+    document.addEventListener('DOMContentLoaded', initializePage, { once: true })
   }
 
   function injectApp() {
