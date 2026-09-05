@@ -1119,7 +1119,8 @@ defineExpose({ initData })
           >
         </div>
 
-        <TransitionGroup name="list" tag="ul" flex="~ col gap-2">
+        <!-- 分组一次可能移除数百个成员，直接更新列表，避免退出动画的绝对定位行覆盖其他按钮。 -->
+        <ul flex="~ col gap-2">
           <!-- All Uploaders Option -->
           <li key="all-uploaders">
             <a
@@ -1183,7 +1184,7 @@ defineExpose({ initData })
               </div>
             </a>
           </li>
-        </TransitionGroup>
+        </ul>
       </div>
     </aside>
 
@@ -1221,26 +1222,5 @@ defineExpose({ initData })
   .secondary-text {
     --uno: "text-$bew-text-auto opacity-85";
   }
-}
-
-/* TransitionGroup 列表过渡效果 */
-.list-move,
-.list-enter-active,
-.list-leave-active {
-  transition:
-    background-color 0.3s ease,
-    color 0.3s ease,
-    box-shadow 0.3s ease;
-}
-
-.list-enter-from,
-.list-leave-to {
-  opacity: 0;
-  transform: translateX(-30px);
-}
-
-/* 确保离开的元素从布局流中移除 */
-.list-leave-active {
-  position: absolute;
 }
 </style>
