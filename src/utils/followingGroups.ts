@@ -1,6 +1,3 @@
-// 仅用于界面分组，绝不能传给 B 站的分组管理接口。
-export const WHISPER_GROUP_ID = -1000
-
 export interface FollowingRelationUser {
   mid: number
   uname: string
@@ -8,13 +5,6 @@ export interface FollowingRelationUser {
   mtime: number
   tag: number[] | null
   special: number
-  attribute: number
-}
-
-export interface WhisperFollowingsResult {
-  code: number
-  message: string
-  data?: { list: FollowingRelationUser[] | null, total?: number }
 }
 
 export interface FollowingGroup {
@@ -31,8 +21,6 @@ export interface FollowingGroupsResult {
 }
 
 export function getFollowingGroupIds(tags: number[] | null, special: number): number[] {
-  if (tags?.includes(WHISPER_GROUP_ID))
-    return [WHISPER_GROUP_ID]
   const ids = new Set(tags ?? [])
   // 特别关注独立于普通分组；仅特别关注的用户仍属于默认分组。
   if (![...ids].some(id => id >= 0))
@@ -49,13 +37,6 @@ export function groupFollowingUploaders<T extends { groupIds: number[] }>(
   fallbackName: (id: number) => string,
 ) {
   const grouped = new Map(groups.map(group => [group.tagid, { ...group, uploaders: [] as T[] }]))
-  grouped.set(WHISPER_GROUP_ID, {
-    tagid: WHISPER_GROUP_ID,
-    name: fallbackName(WHISPER_GROUP_ID),
-    count: 0,
-    tip: '',
-    uploaders: [],
-  })
   for (const uploader of uploaders) {
     for (const id of uploader.groupIds) {
       let group = grouped.get(id)

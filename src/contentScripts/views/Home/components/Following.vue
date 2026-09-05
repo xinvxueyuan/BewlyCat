@@ -58,8 +58,8 @@ import type { DataItem as MomentItem, MomentResult } from '~/models/moment/momen
 import { BadgeText } from '~/models/moment/moment'
 import api from '~/utils/api'
 import { calcTimeSince, parseStatNumber } from '~/utils/dataFormatter'
-import type { FollowingGroup, FollowingGroupsResult, FollowingRelationUser, WhisperFollowingsResult } from '~/utils/followingGroups'
-import { getFollowingGroupIds, groupFollowingUploaders, WHISPER_GROUP_ID } from '~/utils/followingGroups'
+import type { FollowingGroup, FollowingGroupsResult, FollowingRelationUser } from '~/utils/followingGroups'
+import { getFollowingGroupIds, groupFollowingUploaders } from '~/utils/followingGroups'
 import { decodeHtmlEntities } from '~/utils/htmlDecode'
 import emitter from '~/utils/mitt'
 
@@ -119,10 +119,6 @@ const uploaderList = tabState.ref<UploaderInfo[]>('uploaderList', [])
 const followingGroups = tabState.ref<FollowingGroup[]>('followingGroups', [])
 const followingGroupsLoaded = tabState.ref('followingGroupsLoaded', false)
 const expandedGroupIds = tabState.ref<number[]>('expandedGroupIds', [-10])
-const whispersLoaded = tabState.ref('whispersLoaded', false)
-const whispersPage = tabState.ref('whispersPage', 1)
-const whispersLoading = ref(false)
-const whispersRequestFailed = ref(false)
 // 用户操作优先于同时在途的列表请求，避免旧响应恢复已移出的成员。
 const changedUploaderMids = new Set<number>()
 const groupsLoading = ref(false)
@@ -333,8 +329,6 @@ const uploaderRows = computed<UploaderRow[]>(() => {
       return t('home.following_default_group')
     if (id === -10)
       return t('home.following_special_group')
-    if (id === WHISPER_GROUP_ID)
-      return t('home.following_whisper_group')
     return t('home.following_group_name', { id })
   })
   const keyword = searchKeyword.value.trim().toLowerCase()
@@ -383,7 +377,7 @@ function handleUploaderUnfollowed(mid: number) {
 function handleUploaderGroupsChanged(mid: number, groupIds: number[]) {
   changedUploaderMids.add(mid)
   const uploader = uploaderList.value.find(uploader => uploader.mid === mid)
-  const addedGroupIds = groupIds.filter(id => id !== WHISPER_GROUP_ID && !uploader?.groupIds.includes(id))
+  const addedGroupIds = groupIds.filter(id => !uploader?.groupIds.includes(id))
   if (uploader)
     uploader.groupIds = groupIds
   // 只展开新加入的分组；设置特别关注不应同时展开原有的普通分组。
@@ -463,7 +457,7 @@ async function getCurrentUserInfo() {
   return 0
 }
 
-function mapFollowingUploader(user: FollowingRelationUser, whisper = user.attribute === 1): UploaderInfo {
+function mapFollowingUploader(user: FollowingRelationUser): UploaderInfo {
   const recordedTime = uploaderLatestVideoTimes.value[String(user.mid)]
   const hasPostTime = Boolean(recordedTime)
   const lastUpdateTime = recordedTime?.time ?? Number(user.mtime || 0) * 1000
@@ -474,56 +468,7 @@ function mapFollowingUploader(user: FollowingRelationUser, whisper = user.attrib
     hasUpdate: false, // 合并后由 updateUploaderStatus 统一计算已读状态。
     hasPostTime,
     lastUpdateTime,
-    groupIds: whisper ? [WHISPER_GROUP_ID] : getFollowingGroupIds(user.tag, user.special),
-  }
-}
-
-async function loadWhisperFollowings() {
-  if (!tabState.isCurrent() || whispersLoading.value || whispersLoaded.value)
-    return
-  whispersLoading.value = true
-  whispersRequestFailed.value = false
-  try {
-    await uploaderLatestVideoTimesReady
-    const pageSize = 50
-    const seenMids = new Set<number>()
-    while (tabState.isCurrent()) {
-      const response: WhisperFollowingsResult = await api.user.getWhisperFollowings({ pn: whispersPage.value, ps: pageSize })
-      if (!tabState.isCurrent())
-        return
-      if (response.code !== 0 || !response.data || (response.data.list !== null && !Array.isArray(response.data.list)))
-        throw new Error(response.message || t('common.load_failed'))
-      const users = response.data.list ?? []
-      if (users.length > 0 && users.every(user => seenMids.has(user.mid)))
-        throw new Error(t('common.load_failed'))
-      const existing = new Map(uploaderList.value.map(uploader => [uploader.mid, uploader]))
-      for (const user of users) {
-        seenMids.add(user.mid)
-        if (changedUploaderMids.has(user.mid))
-          continue
-        const uploader = existing.get(user.mid)
-        if (uploader)
-          uploader.groupIds = [WHISPER_GROUP_ID]
-        else
-          existing.set(user.mid, mapFollowingUploader(user, true))
-      }
-      uploaderList.value = [...existing.values()]
-      updateUploaderStatus()
-      const total = response.data.total
-      if (users.length < pageSize || (typeof total === 'number' && whispersPage.value * pageSize >= total)) {
-        whispersLoaded.value = true
-        break
-      }
-      whispersPage.value++
-    }
-  }
-  catch (error) {
-    if (tabState.isCurrent())
-      whispersRequestFailed.value = true
-    console.error('[Following] Failed to load whisper followings:', error)
-  }
-  finally {
-    whispersLoading.value = false
+    groupIds: getFollowingGroupIds(user.tag, user.special),
   }
 }
 
@@ -1276,7 +1221,6 @@ onMounted(() => {
     return
   if (settings.value.followingUploaderSort === 'group')
     void loadFollowingGroups(true)
-  void loadWhisperFollowings()
   if (uploaderScrollRef.value)
     uploaderScrollRef.value.scrollTop = tabState.read('uploaderScrollTop', 0)
   isRefreshContextActive.value = true
@@ -1363,16 +1307,6 @@ defineExpose({ initData })
           <template v-else-if="groupsRequestFailed">
             <span>{{ $t('home.following_groups_load_failed') }}</span>
             <button type="button" class="group-retry" @click="loadFollowingGroups(true)">
-              {{ $t('home.following_groups_retry') }}
-            </button>
-          </template>
-        </div>
-
-        <div v-if="whispersLoading || whispersRequestFailed" class="group-status" aria-live="polite">
-          <span v-if="whispersLoading">{{ $t('home.following_whispers_loading') }}</span>
-          <template v-else>
-            <span>{{ $t('home.following_whispers_load_failed') }}</span>
-            <button type="button" class="group-retry" @click="loadWhisperFollowings">
               {{ $t('home.following_groups_retry') }}
             </button>
           </template>

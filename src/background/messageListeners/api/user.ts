@@ -154,15 +154,6 @@ const API_USER = {
     },
     afterHandle: AHS.J_D,
   },
-  // https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/user/relation.md#查询悄悄关注明细
-  getWhisperFollowings: {
-    url: 'https://api.bilibili.com/x/relation/whispers',
-    _fetch: {
-      method: 'get',
-    },
-    params: { pn: 1, ps: 50 },
-    afterHandle: AHS.J_D,
-  },
   // https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/user/relation.md#查询用户关注明细
   getUserFollowings: {
     url: 'https://api.bilibili.com/x/relation/followings',

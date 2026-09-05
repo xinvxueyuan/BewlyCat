@@ -1229,12 +1229,6 @@ video_card:
   watched: Watched
   visited_recently: Visited within the past month
 home:
-  following_whisper_group: Private follows
-  following_add_whisper: Follow privately
-  following_remove_whisper: Remove private follow
-  following_remove_whisper_confirm: 'Remove the private follow for {name}? You will stop privately following this uploader.'
-  following_whispers_loading: Loading private follows…
-  following_whispers_load_failed: Could not load private follows. The list may be incomplete.
   following_default_group: Default group
   following_special_group: Special follows
   following_group_name: 'Group {id}'

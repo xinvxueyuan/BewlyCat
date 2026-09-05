@@ -7,7 +7,6 @@ import ContextMenu from '~/components/ContextMenu.vue'
 import Dialog from '~/components/Dialog.vue'
 import api from '~/utils/api'
 import type { FollowingGroup, FollowingGroupsResult } from '~/utils/followingGroups'
-import { WHISPER_GROUP_ID } from '~/utils/followingGroups'
 import { getCSRF } from '~/utils/main'
 
 interface Uploader {
@@ -29,23 +28,18 @@ const cursorPosition = ref({ x: 0, y: 0 })
 const menuVisible = ref(false)
 const groupMenuVisible = ref(false)
 const confirmVisible = ref(false)
-const confirmedAction = ref<'unfollow' | 'unwhisper'>('unfollow')
 const busy = ref(false)
 const groups = ref<FollowingGroup[]>([])
 let revision = 0
 let disposed = false
 
-const isWhisper = computed(() => target.value?.groupIds.includes(WHISPER_GROUP_ID) ?? false)
-const menuOptions = computed<ContextMenuOption[]>(() => isWhisper.value
-  ? [{ value: 'unwhisper', label: t('home.following_remove_whisper'), icon: 'i-mingcute:eye-line', danger: true }]
-  : [
-      { value: 'move', label: t('home.following_move_group'), icon: 'i-mingcute:folder-line' },
-      ...(target.value?.groupIds.includes(-10)
-        ? [{ value: 'unspecial', label: t('home.following_remove_special'), icon: 'i-mingcute:star-line' }]
-        : [{ value: 'special', label: t('home.following_add_special'), icon: 'i-mingcute:star-line' }]),
-      { value: 'whisper', label: t('home.following_add_whisper'), icon: 'i-mingcute:eye-close-line' },
-      { value: 'unfollow', label: t('video_card.operation.unfollow_user'), icon: 'i-solar:user-minus-bold-duotone', danger: true },
-    ])
+const menuOptions = computed<ContextMenuOption[]>(() => [
+  { value: 'move', label: t('home.following_move_group'), icon: 'i-mingcute:folder-line' },
+  ...(target.value?.groupIds.includes(-10)
+    ? [{ value: 'unspecial', label: t('home.following_remove_special'), icon: 'i-mingcute:star-line' }]
+    : [{ value: 'special', label: t('home.following_add_special'), icon: 'i-mingcute:star-line' }]),
+  { value: 'unfollow', label: t('video_card.operation.unfollow_user'), icon: 'i-solar:user-minus-bold-duotone', danger: true },
+])
 
 const groupOptions = computed<ContextMenuOption[]>(() => {
   const normalGroups = groups.value.filter(group => group.tagid >= 0)
@@ -76,12 +70,11 @@ function open(event: MouseEvent, uploader: Uploader) {
 async function selectAction(action: string | number) {
   if (!target.value || busy.value)
     return
-  if (action === 'unfollow' || action === 'unwhisper') {
-    confirmedAction.value = action
+  if (action === 'unfollow') {
     // 只有确认框的 confirm 事件能够发起取消关注请求。
     confirmVisible.value = true
   }
-  else if (action === 'unspecial' || action === 'special' || action === 'whisper') {
+  else if (action === 'unspecial' || action === 'special') {
     await updateRelation(action)
   }
   else if (action === 'move') {
@@ -107,12 +100,9 @@ async function selectAction(action: string | number) {
   }
 }
 
-async function updateRelation(action: 'unfollow' | 'unspecial' | 'special' | 'move' | 'whisper' | 'unwhisper', groupId?: number) {
+async function updateRelation(action: 'unfollow' | 'unspecial' | 'special' | 'move', groupId?: number) {
   const uploader = target.value
   if (!uploader || busy.value || disposed)
-    return
-  // 悄悄关注属于独立关系，不能把界面使用的分组 ID 发给标签接口。
-  if (isWhisper.value ? action !== 'unwhisper' : action === 'unwhisper')
     return
   const normalIds = uploader.groupIds.filter(id => id >= 0)
   if (normalIds.length === 0)
@@ -126,10 +116,8 @@ async function updateRelation(action: 'unfollow' | 'unspecial' | 'special' | 'mo
     const csrf = getCSRF()
     if (!csrf)
       throw new Error(t('common.please_log_in_first'))
-    // 直接提交关系变更；失败时保留原关注，不能先取消再尝试加入悄悄关注。
-    const relationAct = action === 'whisper' ? 3 : action === 'unwhisper' ? 4 : 2
-    const response = ['unfollow', 'whisper', 'unwhisper'].includes(action)
-      ? await api.user.relationModify({ fid: String(uploader.mid), act: relationAct, re_src: 11, csrf })
+    const response = action === 'unfollow'
+      ? await api.user.relationModify({ fid: String(uploader.mid), act: 2, re_src: 11, csrf })
       : action === 'special'
         ? await api.user.copyFollowingUsers({ fids: String(uploader.mid), tagids: '-10', csrf })
         : await api.user.moveFollowingUsers({
@@ -143,17 +131,15 @@ async function updateRelation(action: 'unfollow' | 'unspecial' | 'special' | 'mo
       throw new Error(response.message || String(response.code))
     if (disposed)
       return
-    if (action === 'unfollow' || action === 'unwhisper') {
+    if (action === 'unfollow') {
       emit('unfollowed', uploader.mid)
     }
     else {
-      const groupIds = action === 'whisper'
-        ? [WHISPER_GROUP_ID]
-        : action === 'unspecial'
-          ? normalIds
-          : action === 'special'
-            ? [-10, ...normalIds]
-            : [...(uploader.groupIds.includes(-10) ? [-10] : []), groupId!]
+      const groupIds = action === 'unspecial'
+        ? normalIds
+        : action === 'special'
+          ? [-10, ...normalIds]
+          : [...(uploader.groupIds.includes(-10) ? [-10] : []), groupId!]
       emit('groupsChanged', uploader.mid, groupIds)
     }
     toast.success(t('home.following_action_success', { name: uploader.name }))
@@ -194,15 +180,15 @@ defineExpose({ open })
   />
   <Dialog
     v-if="confirmVisible && target"
-    :title="confirmedAction === 'unwhisper' ? $t('home.following_remove_whisper') : $t('video_card.unfollow_user_confirm.title')"
+    :title="$t('video_card.unfollow_user_confirm.title')"
     width="420px"
     append-to-bewly-body
-    @confirm="updateRelation(confirmedAction)"
+    @confirm="updateRelation('unfollow')"
     @close="confirmVisible = false"
   >
     <div class="unfollow-confirm-content">
-      <p>{{ $t(confirmedAction === 'unwhisper' ? 'home.following_remove_whisper_confirm' : 'video_card.unfollow_user_confirm.message', { name: target.name }) }}</p>
-      <p v-if="confirmedAction === 'unfollow'" class="unfollow-confirm-warning">
+      <p>{{ $t('video_card.unfollow_user_confirm.message', { name: target.name }) }}</p>
+      <p class="unfollow-confirm-warning">
         {{ $t('video_card.unfollow_user_confirm.warning') }}
       </p>
     </div>

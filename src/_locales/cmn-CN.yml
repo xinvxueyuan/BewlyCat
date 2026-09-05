@@ -1132,12 +1132,6 @@ video_card:
   watched: 已观看
   visited_recently: 近一个月内浏览过
 home:
-  following_whisper_group: 悄悄关注
-  following_add_whisper: 加入悄悄关注
-  following_remove_whisper: 移出悄悄关注
-  following_remove_whisper_confirm: '确定将「{name}」移出悄悄关注吗？移出后将取消对该 UP 主的悄悄关注。'
-  following_whispers_loading: 正在加载悄悄关注…
-  following_whispers_load_failed: 悄悄关注加载失败，列表可能不完整
   following_default_group: 默认分组
   following_special_group: 特别关注
   following_group_name: '分组 {id}'
