@@ -2,7 +2,7 @@ import { settings } from '~/logic'
 import type { CustomPlayOrderContext, RandomPlayOrder } from '~/logic/storage'
 import { i18n } from '~/utils/i18n'
 
-import { applyAutoPlayByVideoType, detectVideoType, disableNativeEndPlaybackBehavior, doesEndBehaviorAllowCustomAdvance, getVideoElement, isPlayerShowingAdvertisement, setCustomEndPlaybackHandlerActive, supportsCustomPlaybackForVideoType, VideoType } from './player'
+import { applyAutoPlayByVideoType, detectVideoType, disableNativeEndPlaybackBehavior, doesEndBehaviorAllowCustomAdvance, getVideoElement, isPlayerEndingPanelVisible, isPlayerShowingAdvertisement, setCustomEndPlaybackHandlerActive, supportsCustomPlaybackForVideoType, VideoType } from './player'
 
 // 随机播放状态管理
 let isRandomPlayEnabled = false
@@ -13,12 +13,14 @@ let originalDurationListener: (() => void) | null = null
 let originalTimeUpdateListener: (() => void) | null = null
 let listenerVideo: HTMLVideoElement | null = null
 let videoObserver: MutationObserver | null = null
-let isPageObserverInitialized = false
 let randomPlayInitGeneration = 0
 let userManuallySetRandomPlay = false // 用户手动设置的随机播放状态标志
 let customEpisodeOrder: string[] = []
 let activePlayOrder: RandomPlayOrder | null = null
 let playlistEditorController: AbortController | null = null
+let pageChangeObserver: MutationObserver | null = null
+let pageChangeDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let pageChangeRebuildTimer: ReturnType<typeof setTimeout> | null = null
 let playlistEditorButton: HTMLButtonElement | null = null
 let playlistEditorStyle: HTMLStyleElement | null = null
 const manualPlayStateStorageKey = 'bewly-custom-play-state'
@@ -106,15 +108,6 @@ function getEffectiveCustomPlayOrder(): RandomPlayOrder | null {
 
 function shouldCustomPlayHandleEnd(): boolean {
   return isRandomPlayEnabled && doesEndBehaviorAllowCustomAdvance()
-}
-
-function isPlayerEndingPanelVisible(): boolean {
-  const panel = document.querySelector<HTMLElement>('.bpx-player-ending-wrap, .bilibili-player-ending-panel')
-  if (!panel)
-    return false
-  if (panel.classList.contains('bpx-state-hidden'))
-    return false
-  return panel.offsetParent !== null || getComputedStyle(panel).display !== 'none'
 }
 
 function isGenuineCustomPlayEnd(
@@ -1105,6 +1098,7 @@ export function applyRandomPlayActivationSettings(): void {
 
 // 重置初始化状态
 export function resetRandomPlayInitialization(): void {
+  clearPageChangeTimers()
   stopNativePlaylistEditing()
   isRandomPlayInitialized = false
   randomPlayInitGeneration++
@@ -1114,6 +1108,9 @@ export function resetRandomPlayInitialization(): void {
 }
 
 export function destroyRandomPlay(): void {
+  pageChangeObserver?.disconnect()
+  pageChangeObserver = null
+  clearPageChangeTimers()
   stopNativePlaylistEditing()
   randomPlayInitGeneration++
   setRandomPlayEnabled(false)
@@ -1216,24 +1213,35 @@ export function initRandomPlayOnVideoPage(): void {
   setTimeout(checkAndInit, 500)
 }
 
+function clearPageChangeTimers() {
+  if (pageChangeDebounceTimer !== null) {
+    clearTimeout(pageChangeDebounceTimer)
+    pageChangeDebounceTimer = null
+  }
+  if (pageChangeRebuildTimer !== null) {
+    clearTimeout(pageChangeRebuildTimer)
+    pageChangeRebuildTimer = null
+  }
+}
+
 // 只补播放列表 DOM；切集与默认播放器模式共用 content script 的判定链路。
 export function observeRandomPlayPageChanges(): void {
-  if (isPageObserverInitialized)
+  if (pageChangeObserver)
     return
-  isPageObserverInitialized = true
 
-  // 使用MutationObserver监听DOM变化
-  let domChangeTimeout: number | null = null
-  const observer = new MutationObserver(() => {
-    if (!isCustomPlayPage())
+  pageChangeObserver = new MutationObserver(() => {
+    if (!isCustomPlayPage() || !settings.value.enableRandomPlay)
       return
 
     // 使用防抖避免频繁触发
-    if (domChangeTimeout) {
-      clearTimeout(domChangeTimeout)
-    }
+    if (pageChangeDebounceTimer !== null)
+      clearTimeout(pageChangeDebounceTimer)
 
-    domChangeTimeout = window.setTimeout(() => {
+    pageChangeDebounceTimer = setTimeout(() => {
+      pageChangeDebounceTimer = null
+      if (!isCustomPlayPage() || !settings.value.enableRandomPlay)
+        return
+
       if (customEpisodeOrder.length > 0)
         applyCustomEpisodeVisualOrder()
 
@@ -1248,8 +1256,14 @@ export function observeRandomPlayPageChanges(): void {
 
       // 如果按钮不存在但应该存在（有自动播放容器且启用了功能），则重新创建。
       // 不要求 mutation 本身包含 auto-play；B 站常只替换其共同父容器。
-      if ((!existingBtn || isMisplacedRandomPlay) && autoPlayContainer && settings.value.enableRandomPlay) {
-        setTimeout(() => {
+      if ((!existingBtn || isMisplacedRandomPlay) && autoPlayContainer && pageChangeRebuildTimer === null) {
+        const generation = randomPlayInitGeneration
+        pageChangeRebuildTimer = setTimeout(() => {
+          pageChangeRebuildTimer = null
+          if (generation !== randomPlayInitGeneration || !isRandomPlayInitialized
+            || !isCustomPlayPage() || !settings.value.enableRandomPlay) {
+            return
+          }
           createRandomPlayUI()
           applyPreservedOrDefaultCustomPlay()
         }, 500)
@@ -1259,7 +1273,7 @@ export function observeRandomPlayPageChanges(): void {
 
   // 内容脚本在 document_start 注入，设置水合触发的初始化可能早于 <body> 解析；
   // 回落到 documentElement 并靠 subtree 覆盖随后插入的 body。
-  observer.observe(document.body ?? document.documentElement, {
+  pageChangeObserver.observe(document.body ?? document.documentElement, {
     childList: true,
     subtree: true,
   })
