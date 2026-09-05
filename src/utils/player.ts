@@ -186,10 +186,19 @@ export function fullscreen() {
   }).start()
 }
 
-export function webFullscreen() {
+export interface PlayerModeApplication {
+  shouldApply: () => boolean
+  onApplied: () => void
+}
+
+export function webFullscreen(application?: PlayerModeApplication) {
   new RetryTask(20, 500, () => {
+    if (application && !application.shouldApply())
+      return true
+
     // 检查是否已经处于网页全屏状态
     if (document.querySelector('[data-screen=\'web\']')) {
+      application?.onApplied()
       // 即使已经是网页全屏状态，也应用倍速记忆
       setTimeout(() => {
         applyPlayerEnhancements()
@@ -199,6 +208,7 @@ export function webFullscreen() {
 
     const result = webFullscreenClick()
     if (result) {
+      application?.onApplied()
       // 在成功进入网页全屏后应用倍速记忆
       setTimeout(() => {
         applyPlayerEnhancements()
@@ -246,10 +256,14 @@ function scrollPlayerToOptimalPosition(delay = 1000) {
   }
 }
 
-export function widescreen() {
+export function widescreen(application?: PlayerModeApplication) {
   new RetryTask(20, 500, () => {
+    if (application && !application.shouldApply())
+      return true
+
     // 检查是否已经处于宽屏状态
     if (document.querySelector('[data-screen=\'wide\']')) {
+      application?.onApplied()
       // 即使已经是宽屏状态，也执行滚动和倍速记忆
       scrollPlayerToOptimalPosition()
       setTimeout(() => {
@@ -260,6 +274,7 @@ export function widescreen() {
 
     const result = widescreenClick()
     if (result) {
+      application?.onApplied()
       scrollPlayerToOptimalPosition()
       // 在成功进入宽屏后应用倍速记忆
       setTimeout(() => {
@@ -806,6 +821,31 @@ export function isPlayerShowingAdvertisement(): boolean {
     '.bpx-player-ads-skip',
     '.bpx-player-btn-skip',
   ].join(','))
+}
+
+const PLAYER_ENDING_PANEL_SELECTOR = [
+  '.bpx-player-ending-wrap',
+  '.bilibili-player-ending-panel',
+].join(',')
+
+export function isPlayerEndingPanelVisible(): boolean {
+  return Array.from(document.querySelectorAll<HTMLElement>(PLAYER_ENDING_PANEL_SELECTOR)).some((panel) => {
+    if (panel.classList.contains('bpx-state-hidden') || !panel.getClientRects().length)
+      return false
+    const style = getComputedStyle(panel)
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse'
+  })
+}
+
+/** 播放器是否停在播完推荐页。此时不要再点全屏或搬宽屏，否则会把推荐页打回最后一帧。 */
+export function isPlayerShowingEndingRecommendation(): boolean {
+  if (isPlayerShowingAdvertisement())
+    return false
+
+  if (isPlayerEndingPanelVisible())
+    return true
+
+  return !!getVideoElement()?.ended
 }
 
 /** 关闭 B 站原生的续播行为，让自定义播放独占视频结束后的切集。 */
@@ -1406,7 +1446,10 @@ export function showClockTime(firstShow = false) {
     }
   }
   else {
-    clockInterval = null
+    if (clockInterval) {
+      clearInterval(clockInterval)
+      clockInterval = null
+    }
     if (clockElement) {
       clockElement.style.display = 'none'
     }

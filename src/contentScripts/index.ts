@@ -23,7 +23,7 @@ import { getCookie, injectCSS, isElectron, isHomePage, isInIframe, isNotificatio
 import { initNativeFavoriteSeasonPlayAllIntercept } from '~/utils/nativeFavoriteSeasonPlayAll'
 import { createPageSettingsPayload } from '~/utils/pageSettingsProtocol'
 import { isPhotoViewerOpen } from '~/utils/photoViewer'
-import { applyAutoPlayByVideoType, applyDefaultCaptionState, applyDefaultDanmakuState, applyRememberedPlaybackRate, defaultMode, getVideoElement, handleVideoPageNavigation, isPlayerDisplayModeReady, isVideoPage, resetAutoPlayUserChangeFlag, resolveDefaultVideoPlayerMode, startAutoExitFullscreenMonitoring, startAutoPlayUserChangeMonitoring, startPlaybackRateMonitoring, webFullscreen, widescreen } from '~/utils/player'
+import { applyAutoPlayByVideoType, applyDefaultCaptionState, applyDefaultDanmakuState, applyRememberedPlaybackRate, defaultMode, getVideoElement, handleVideoPageNavigation, isPlayerDisplayModeReady, isPlayerShowingEndingRecommendation, isVideoPage, resetAutoPlayUserChangeFlag, resolveDefaultVideoPlayerMode, startAutoExitFullscreenMonitoring, startAutoPlayUserChangeMonitoring, startPlaybackRateMonitoring, webFullscreen, widescreen } from '~/utils/player'
 import { applyPreservedOrDefaultCustomPlay, applyRandomPlayActivationSettings, destroyRandomPlay, initRandomPlay, isCustomPlayPage, resetRandomPlayInitialization, syncRandomPlayOrder, syncRandomPlayUI } from '~/utils/randomPlay'
 import { getPluginSearchResultsUrl, navigateToPluginSearchResultsInPlace, openSearchResults, shouldUsePluginSearchResultsPage } from '~/utils/searchNavigation'
 import { setupShortcutHandlers } from '~/utils/shortcuts'
@@ -520,6 +520,17 @@ else if (shouldInitializeContentScript) {
     }
 
     const currentNavigationKey = getVideoNavigationKey(location.href)
+
+    // 此检查必须先于“已完成”去重，也不搬动已经进入宽屏的播放器。
+    // SPA 的新 URL 可能仍对应旧媒体的结束面板，不能在此标记新导航完成。
+    if (!isBewlyWidescreenActive() && isPlayerShowingEndingRecommendation()) {
+      clearPlayerModeRetry()
+      exitBewlyWidescreen()
+      if (lastAppliedPlayerModeNavigationKey !== currentNavigationKey)
+        applyPlayerModeCompanionSettings()
+      return
+    }
+
     if (lastAppliedPlayerModeNavigationKey === currentNavigationKey)
       return
 
@@ -592,9 +603,26 @@ else if (shouldInitializeContentScript) {
 
     clearPlayerModeRetry()
 
+    const application = {
+      shouldApply: () => getVideoNavigationKey(location.href) === currentNavigationKey
+        && lastAppliedPlayerModeNavigationKey !== currentNavigationKey
+        && document.visibilityState === 'visible'
+        && !document.documentElement.classList.contains(BEWLY_IFRAME_DRAWER_HOST_CLASS)
+        && !isPlayerShowingEndingRecommendation(),
+      onApplied: () => {
+        if (getVideoNavigationKey(location.href) !== currentNavigationKey)
+          return
+        applyPlayerModeCompanionSettings()
+        lastAppliedPlayerModeNavigationKey = currentNavigationKey
+        autoContinuationNavigationKey = undefined
+        lastVideoEndedAt = 0
+      },
+    }
+
     if (!targetPlayerMode || targetPlayerMode === 'default') {
     // 默认模式也需要居中显示
       defaultMode()
+      application.onApplied()
     }
     else {
       switch (targetPlayerMode) {
@@ -603,20 +631,17 @@ else if (shouldInitializeContentScript) {
             settings.value.bewlyWidescreenSidebarPosition || 'right',
             // loading 已在等待阶段挂载，并保持到宽屏布局完成。
             false,
+            application,
           )
           break
         case 'webFullscreen':
-          webFullscreen()
+          webFullscreen(application)
           break
         case 'widescreen':
-          widescreen()
+          widescreen(application)
           break
       }
     }
-    applyPlayerModeCompanionSettings()
-    lastAppliedPlayerModeNavigationKey = currentNavigationKey
-    autoContinuationNavigationKey = undefined
-    lastVideoEndedAt = 0
   }
 
   function clearPlayerModeRetry() {
@@ -983,9 +1008,25 @@ else if (shouldInitializeContentScript) {
   window.addEventListener('hashchange', scheduleUrlChangeCheck, true)
   window.addEventListener('pageshow', scheduleUrlChangeCheck, true)
   document.addEventListener('ended', (event) => {
-    if (event.target === getVideoElement())
-      lastVideoEndedAt = Date.now()
+    if (event.target !== getVideoElement())
+      return
+    lastVideoEndedAt = Date.now()
+    // 默认模式还在等头像/顶栏时视频可能已经结束。立刻走守卫，撤掉宽屏 loading。
+    if (isPlayerShowingEndingRecommendation())
+      applyDefaultPlayerMode()
   }, true)
+
+  // 结束面板分支只暂停默认模式应用。复用 video 或换新节点加载下一集后，
+  // 让原生事件处理完成，再检查当前媒体，避免旧 ended 状态锁死新导航。
+  for (const eventName of ['loadedmetadata', 'loadeddata', 'playing']) {
+    document.addEventListener(eventName, (event) => {
+      if (event.target === getVideoElement()
+        && isVideoOrBangumiPage()
+        && lastAppliedPlayerModeNavigationKey !== getVideoNavigationKey(location.href)) {
+        schedulePlayerModeRetry()
+      }
+    }, true)
+  }
 
   // 添加页面加载监听
   window.addEventListener('load', () => {
@@ -1150,11 +1191,6 @@ else if (shouldInitializeContentScript) {
         || playerModeRetryTimer) {
         return
       }
-
-      // 已结束视频的结尾推荐面板属于播放器自身状态。切回标签页时不要再次
-      // 触发模式就绪流程，避免 B 站把结尾面板还原成最后一帧。
-      if (getVideoElement()?.ended)
-        return
 
       waitForPlayerModePageSettle()
       applyDefaultPlayerMode()

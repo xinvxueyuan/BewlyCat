@@ -6,7 +6,8 @@ import { i18n } from '~/utils/i18n'
 
 import { injectCSS } from './main'
 import { isPhotoViewerOpen } from './photoViewer'
-import { getVideoElement } from './player'
+import type { PlayerModeApplication } from './player'
+import { getVideoElement, isPlayerShowingEndingRecommendation } from './player'
 
 function t(key: string, params: Record<string, unknown> = {}) {
   return String(i18n.global.t(key, params))
@@ -114,6 +115,7 @@ let pageLoadHandler: (() => void) | undefined
 let readyRetryCount = 0
 let waitingForLoad = false
 let pendingSidebarPosition: 'left' | 'right' = 'right'
+let pendingApplication: PlayerModeApplication | undefined
 let nativePlayerModeGuardInstalled = false
 
 const selectors = {
@@ -2479,7 +2481,7 @@ function schedulePlayerResizeSync(currentState: BewlyWidescreenState) {
   clearPlayerResizeSync(currentState)
   currentState.resizeSyncTimers = [0, 80, 180, 360, 720].map(delay =>
     setTimeout(() => {
-      if (!state || state !== currentState)
+      if (!state || state !== currentState || isPlayerShowingEndingRecommendation())
         return
 
       window.dispatchEvent(new Event('resize'))
@@ -2957,9 +2959,12 @@ function applyNow(sidebarPosition: 'left' | 'right' = 'right') {
   setupDomRefreshObserver(nextState)
   setupSidebarInteractionTracking(nextState)
   setupSidebarToggleAutoHide(nextState)
-  setTimeout(() => window.dispatchEvent(new Event('resize')), 0)
   removeSwitchHint()
   removeWidescreenLoading()
+
+  const application = pendingApplication
+  pendingApplication = undefined
+  application?.onApplied()
 
   return true
 }
@@ -3001,6 +3006,9 @@ function scheduleReadyRetry(delay = READY_RETRY_INTERVAL) {
     if (state)
       return
 
+    if (!canApplyPendingLayout())
+      return
+
     if (isReadyForLayout() && applyNow(pendingSidebarPosition))
       return
 
@@ -3008,12 +3016,24 @@ function scheduleReadyRetry(delay = READY_RETRY_INTERVAL) {
     if (readyRetryCount <= READY_RETRY_MAX)
       scheduleReadyRetry()
     else
-      removeWidescreenLoading()
+      exitBewlyWidescreen()
   }, delay)
+}
+
+function canApplyPendingLayout() {
+  if (!pendingApplication || pendingApplication.shouldApply())
+    return true
+
+  // 自动进页任务可能跨越视频结束、后台恢复或 SPA 切集；在搬 DOM 前取消。
+  exitBewlyWidescreen()
+  return false
 }
 
 function startAfterPageLoad(sidebarPosition: 'left' | 'right' = 'right') {
   if (state)
+    return
+
+  if (!canApplyPendingLayout())
     return
 
   waitingForLoad = false
@@ -3043,10 +3063,15 @@ function scheduleSidebarRefresh() {
 export function applyBewlyWidescreen(
   sidebarPosition: 'left' | 'right' = 'right',
   showLoading = true,
+  application?: PlayerModeApplication,
 ) {
   ensureNativePlayerModeGuard()
   installSettingsWatchers()
   if (state || waitingForLoad || readyRetryTimer)
+    return
+
+  pendingApplication = application
+  if (!canApplyPendingLayout())
     return
 
   pendingSidebarPosition = sidebarPosition
@@ -3083,6 +3108,7 @@ export function exitBewlyWidescreen(
   removeSwitchHint(true)
   removeWidescreenLoading(true)
   waitingForLoad = false
+  pendingApplication = undefined
 
   if (options.userInitiated)
     window.dispatchEvent(new Event(BEWLY_WIDESCREEN_USER_EXIT))
