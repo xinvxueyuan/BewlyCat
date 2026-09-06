@@ -147,6 +147,7 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
 <style scoped lang="scss">
 .moment-comment-tree {
   position: relative;
-  --bg1: var(--bew-elevated);
+  // 折叠圆点需要不透明底色，避免树状竖线透过减号图标。
+  --bg1: var(--bew-elevated-solid);
 }
 </style>

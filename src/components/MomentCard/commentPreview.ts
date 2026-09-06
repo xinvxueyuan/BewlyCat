@@ -113,6 +113,7 @@ function normalizeComment(raw: RawComment): PreviewComment {
     : undefined
   const replies = normalizeComments(raw.replies)
   const replyCount = Math.max(Number(raw.rcount ?? raw.count) || 0, replies.length)
+  const hotReplies = replies.slice(0, 3)
   return {
     id: String(raw.rpid_str || raw.rpid || ''),
     parentId: String(raw.parent_str || raw.parent || '0'),
@@ -133,13 +134,13 @@ function normalizeComment(raw: RawComment): PreviewComment {
     collapsed: false,
     replyCount,
     // 列表接口的 replies 是热门摘要；与按顺序分页的完整回复分开保存。
-    hotReplies: replies.slice(0, 3),
+    hotReplies,
     repliesExpanded: false,
     replies: [],
     replyPage: 0,
     repliesLoading: false,
     repliesError: '',
-    repliesDone: replyCount === 0,
+    repliesDone: replyCount <= hotReplies.length,
   }
 }
 

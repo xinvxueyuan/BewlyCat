@@ -158,7 +158,7 @@ onMounted(() => {
             </footer>
           </template>
         </article>
-        <div v-if="group.root.replyCount > 0 || group.root.repliesExpanded" class="moment-comments__more-replies">
+        <div v-if="group.root.replyCount > group.root.hotReplies.length || group.root.repliesExpanded" class="moment-comments__more-replies">
           <button
             type="button"
             :aria-expanded="group.root.repliesExpanded"
