@@ -4199,8 +4199,9 @@ else if (shouldInitializePageScript) {
     return text
   }
 
-  // 番剧选集被搬出 #__next 后，React 17+ 的根节点事件委托收不到点击。
-  // 在页面世界里把 onClick 接回季节切换、排序和分集按钮。
+  // 番剧模块被搬出 #__next 后，React 根节点收不到它们的事件。
+  // 除选集点击外，追番/分享菜单需要进入、离开事件，点赞长按需要完整的
+  // 按下、移动、释放序列；仅转发 click 会让这些原生交互失效。
   const WIDESCREEN_REACT_EVENT_BRIDGE_ATTRIBUTE = 'data-bewly-react-bridge'
 
   function getPageReactProps(element: Element) {
@@ -4212,7 +4213,7 @@ else if (shouldInitializePageScript) {
     return props && typeof props === 'object' ? props as Record<string, unknown> : null
   }
 
-  function invokeMovedReactClick(event: Event) {
+  function invokeMovedReactEvent(event: Event, propName: string, enterLeave = false) {
     const target = event.target
     if (!(target instanceof Element))
       return
@@ -4221,18 +4222,72 @@ else if (shouldInitializePageScript) {
     if (!boundary)
       return
 
+    const path: Element[] = []
+    const relatedTarget = enterLeave ? (event as MouseEvent).relatedTarget : null
     let node: Element | null = target
-    while (node && node !== boundary && boundary.contains(node)) {
-      const onClick = getPageReactProps(node)?.onClick
-      if (typeof onClick === 'function') {
-        ;(onClick as (event: Event) => void)(event)
-        return
-      }
+    while (node && boundary.contains(node)) {
+      // 在按钮的图标、文字和菜单之间移动不算离开整个按钮。
+      if (!enterLeave || !(relatedTarget instanceof Node) || !node.contains(relatedTarget))
+        path.push(node)
+      if (node === boundary)
+        break
       node = node.parentElement
+    }
+
+    // React 的 enter 从外向内触发，leave 与普通冒泡事件从内向外触发。
+    if (propName === 'onMouseEnter')
+      path.reverse()
+
+    for (const currentTarget of path) {
+      const handler = getPageReactProps(currentTarget)?.[propName]
+      if (typeof handler !== 'function')
+        continue
+
+      // 长按库会调用 persist() 并保存事件。不要修改原生事件；通过代理保留
+      // 坐标、触摸点与原生方法，同时提供 React handler 所需的事件接口。
+      const forwardedEvent = new Proxy(event, {
+        get(nativeEvent, key) {
+          if (key === 'nativeEvent')
+            return nativeEvent
+          if (key === 'currentTarget')
+            return currentTarget
+          if (key === 'persist')
+            return () => {}
+          if (key === 'isDefaultPrevented')
+            return () => nativeEvent.defaultPrevented
+          if (key === 'isPropagationStopped')
+            return () => nativeEvent.cancelBubble
+          if (key === 'type' && enterLeave)
+            return propName === 'onMouseEnter' ? 'mouseenter' : 'mouseleave'
+          const value = Reflect.get(nativeEvent, key, nativeEvent)
+          return typeof value === 'function' ? value.bind(nativeEvent) : value
+        },
+      })
+      ;(handler as (event: Event) => void)(forwardedEvent)
+      if (event.cancelBubble)
+        break
     }
   }
 
-  document.addEventListener('click', invokeMovedReactClick, true)
+  const movedReactEvents = {
+    click: 'onClick',
+    mousedown: 'onMouseDown',
+    mousemove: 'onMouseMove',
+    mouseup: 'onMouseUp',
+    touchstart: 'onTouchStart',
+    touchmove: 'onTouchMove',
+    touchend: 'onTouchEnd',
+    touchcancel: 'onTouchCancel',
+    mouseover: 'onMouseEnter',
+    mouseout: 'onMouseLeave',
+  }
+  for (const [eventName, propName] of Object.entries(movedReactEvents)) {
+    document.addEventListener(eventName, event => invokeMovedReactEvent(
+      event,
+      propName,
+      eventName === 'mouseover' || eventName === 'mouseout',
+    ), { capture: true, passive: false })
+  }
 
   // 拦截 navigator.clipboard.writeText，启用净化分享链接功能
   const originalWriteText = navigator.clipboard.writeText.bind(navigator.clipboard)

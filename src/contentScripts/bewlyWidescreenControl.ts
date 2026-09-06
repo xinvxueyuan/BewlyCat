@@ -6,7 +6,7 @@ import { i18n } from '~/utils/i18n'
 import { isVideoOrBangumiPage } from '~/utils/main'
 
 const PLAYER_CONTROL_BAR_SELECTOR = '.bpx-player-control-bottom-right'
-const PLAYER_ROOT_SELECTOR = '#playerWrap, #bilibili-player, #bilibiliPlayer, .bpx-player-container, .bilibili-player'
+const PLAYER_ROOT_SELECTOR = '#bilibili-player-wrap, #playerWrap, #bilibili-player, #bilibiliPlayer, .bpx-player-container, .bilibili-player'
 const PLAYER_MODE_BUTTON_SELECTOR = '.bpx-player-ctrl-web, .bilibili-player-video-web-fullscreen'
 const BUTTON_CLASS = 'bewly-widescreen-control'
 const TOOLTIP_CLASS = 'bewly-player-tooltip'
@@ -46,7 +46,7 @@ function findPlayerControlBar(): HTMLElement | null {
 }
 
 function findPlayerRoot(controlBar?: HTMLElement | null): HTMLElement | null {
-  return controlBar?.closest<HTMLElement>('#playerWrap, #bilibili-player, #bilibiliPlayer')
+  return controlBar?.closest<HTMLElement>('#bilibili-player-wrap, #playerWrap, #bilibili-player, #bilibiliPlayer')
     ?? controlBar?.closest<HTMLElement>('.bpx-player-container, .bilibili-player')
     ?? document.querySelector<HTMLElement>(PLAYER_ROOT_SELECTOR)
 }

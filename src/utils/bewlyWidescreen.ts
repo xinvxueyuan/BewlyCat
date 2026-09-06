@@ -120,6 +120,9 @@ let nativePlayerModeGuardInstalled = false
 
 const selectors = {
   player: [
+    // 新版番剧页把 NanoPlayer 挂在这个带宽高比的外层容器里。搬运
+    // 内层 #bilibili-player 会把外层留在原页面，导致播放器继续受原布局裁切。
+    '#bilibili-player-wrap',
     '#playerWrap',
     '#bilibili-player',
     '#bilibiliPlayer',
@@ -136,6 +139,9 @@ const selectors = {
     'h1[title]',
   ],
   info: [
+    // PGC 播放页的标题、简介、评分和「追番」入口都收在 mediaInfoWrap 中。
+    // 将整个 React 节点搬入侧栏，避免只匹配旧版视频信息而丢失订阅入口。
+    '[class*="mediainfo_mediaInfoWrap"]',
     '.video-info-detail-list',
     '.video-info-detail-content',
   ],
@@ -148,6 +154,7 @@ const selectors = {
   toolbar: [
     '#arc_toolbar_report',
     '.video-toolbar-container',
+    '.toolbar',
   ],
   description: [
     '#v_desc',
@@ -161,6 +168,7 @@ const selectors = {
     '.bpx-player-sending-bar',
     '.bilibili-player-video-sendbar',
     '.bilibili-player-video-inputbar',
+    '[class*="NanoPlayer_nonoPlayerSendingBar"]',
   ],
   danmakuFocusable: [
     '.danmaku-wrap .bui-collapse-header',
@@ -1172,6 +1180,7 @@ function injectLayoutStyle() {
       z-index: auto !important;
     }
 
+    #${ROOT_ID} #bilibili-player-wrap,
     #${ROOT_ID} #playerWrap,
     #${ROOT_ID} #bilibili-player,
     #${ROOT_ID} #bilibiliPlayer,
@@ -1187,6 +1196,7 @@ function injectLayoutStyle() {
       border-radius: 0 !important;
       outline: 0 !important;
       background: #000 !important;
+      padding: 0 !important;
       overflow: hidden !important;
     }
 
@@ -1202,6 +1212,7 @@ function injectLayoutStyle() {
 
     #${ROOT_ID} .player-wrap *:not(.bili-danmaku-x-guide, .bili-danmaku-x-guide *),
     #${ROOT_ID} .bpx-player-container *:not(.bili-danmaku-x-guide, .bili-danmaku-x-guide *),
+    #${ROOT_ID} #bilibili-player-wrap *:not(.bili-danmaku-x-guide, .bili-danmaku-x-guide *),
     #${ROOT_ID} .bpx-player-primary-area,
     #${ROOT_ID} .bpx-player-video-area,
     #${ROOT_ID} .bpx-player-video-wrap,
@@ -1248,16 +1259,37 @@ function injectLayoutStyle() {
       filter: var(--bewly-widescreen-action-canvas-filter, none) !important;
     }
 
+    #${ROOT_ID} #bilibili-player-wrap > *,
     #${ROOT_ID} .player-wrap > *,
     #${ROOT_ID} .bpx-player-container > * {
       border-radius: 0 !important;
     }
 
+    #${ROOT_ID} #bilibili-player-wrap,
     #${ROOT_ID} #bilibili-player,
     #${ROOT_ID} #bilibiliPlayer,
     #${ROOT_ID} .bpx-player-container {
       width: 100% !important;
       height: 100% !important;
+    }
+
+    #${ROOT_ID} #bilibili-player-wrap .video_playerInner,
+    #${ROOT_ID} #bilibili-player-wrap [class*="video_playerInner"] {
+      position: absolute !important;
+      inset: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+
+    #${ROOT_ID} #bilibili-player-wrap [class*="NanoPlayer_nonoPlayerContainer"],
+    #${ROOT_ID} #bilibili-player-wrap [class*="NanoPlayer_nonoPlayerPrimaryArea"],
+    #${ROOT_ID} #bilibili-player-wrap [class*="NanoPlayer_nanoDocker"] {
+      width: 100% !important;
+      height: 100% !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
     }
 
     #${ROOT_ID} .bpx-player-primary-area,
@@ -1359,6 +1391,7 @@ function injectLayoutStyle() {
       }
 
       #${ROOT_ID}[data-center-layout="true"] .bewly-widescreen-player-frame > *,
+      #${ROOT_ID}[data-center-layout="true"] .bewly-widescreen-player-frame > #bilibili-player-wrap,
       #${ROOT_ID}[data-center-layout="true"] .bewly-widescreen-player-frame > #playerWrap,
       #${ROOT_ID}[data-center-layout="true"] .bewly-widescreen-player-frame > #bilibili-player,
       #${ROOT_ID}[data-center-layout="true"] .bewly-widescreen-player-frame > #bilibiliPlayer,
@@ -1543,6 +1576,10 @@ function injectLayoutStyle() {
       display: none;
     }
 
+    #${ROOT_ID} .bewly-widescreen-info-slot:has([class*="mediainfo_mediaInfoWrap"]) {
+      overflow: visible;
+    }
+
     #${ROOT_ID} .bewly-widescreen-info-slot .video-info-meta,
     #${ROOT_ID} .bewly-widescreen-info-slot .video-info-detail-list {
       width: 100% !important;
@@ -1574,6 +1611,89 @@ function injectLayoutStyle() {
       width: var(--bew-icon-size-sm, 16px) !important;
       height: var(--bew-icon-size-sm, 16px) !important;
       flex: 0 0 auto !important;
+    }
+
+    /* PGC 播放页的 mediaInfo 原本按整栏宽度排版，搬入窄侧栏后收紧封面和
+       标题间距，保留评分、简介与「追番」入口的可见性。 */
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_mediaInfoWrap"] {
+      display: flex !important;
+      width: 100% !important;
+      min-width: 0 !important;
+      padding: 8px 0 !important;
+      border-top: 0 !important;
+      overflow: visible !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_mediaCover"] {
+      width: 72px !important;
+      height: 96px !important;
+      flex: 0 0 72px !important;
+      margin-right: 8px !important;
+      border-radius: var(--bew-radius-md, 8px) !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_mediaRight"] {
+      min-width: 0 !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_mediaTitle"] {
+      height: auto !important;
+      max-height: 40px !important;
+      padding-right: 0 !important;
+      margin-bottom: 4px !important;
+      color: var(--bewly-widescreen-text-primary) !important;
+      font-size: var(--bew-font-size-title, 15px) !important;
+      line-height: var(--bew-line-height-title, 22px) !important;
+      -webkit-line-clamp: 2 !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_mediaDesc"] {
+      height: auto !important;
+      max-height: 32px !important;
+      margin-bottom: 4px !important;
+      color: var(--bewly-widescreen-text-secondary) !important;
+      font-size: var(--bew-font-size-caption, 12px) !important;
+      line-height: var(--bew-line-height-caption, 16px) !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_media_desc_section"] {
+      height: 36px !important;
+      margin-bottom: 4px !important;
+      color: var(--bewly-widescreen-text-secondary) !important;
+      font-size: var(--bew-font-size-caption, 12px) !important;
+      line-height: var(--bew-line-height-caption, 18px) !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_bottomBar"],
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_mediaToolbar"] {
+      display: flex !important;
+      align-items: center !important;
+      flex-wrap: wrap !important;
+      gap: 8px !important;
+      min-width: 0 !important;
+      margin-top: 4px !important;
+    }
+
+    /* 原站把追番工具栏绝对定位在标题右侧；窄侧栏改为独立一行。 */
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_mediaToolbar"] {
+      position: static !important;
+      inset: auto !important;
+      width: 100% !important;
+    }
+
+    /* 订阅状态菜单展开时越过下方选集/评论面板，关闭后恢复原层级。 */
+    #${ROOT_ID} .bewly-widescreen-sidebar-top:has([class*="follow_followOptions"][class*="follow_shown"]) {
+      z-index: 2;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="mediainfo_mediaToolbar"] > * {
+      min-width: 0 !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-info-slot [class*="follow_btnFollow"] {
+      padding: 4px 12px !important;
+      font-size: var(--bew-font-size-caption, 12px) !important;
+      line-height: var(--bew-line-height-caption, 16px) !important;
     }
 
     #${ROOT_ID} .bewly-widescreen-action-slot {
@@ -1720,7 +1840,8 @@ function injectLayoutStyle() {
     }
 
     #${ROOT_ID} .bewly-widescreen-action-slot .video-toolbar-container,
-    #${ROOT_ID} .bewly-widescreen-action-slot #arc_toolbar_report {
+    #${ROOT_ID} .bewly-widescreen-action-slot #arc_toolbar_report,
+    #${ROOT_ID} .bewly-widescreen-action-slot .toolbar {
       display: flex !important;
       align-items: center !important;
       justify-content: flex-start !important;
@@ -1733,6 +1854,33 @@ function injectLayoutStyle() {
       background: transparent !important;
       box-shadow: none !important;
       overflow: visible !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-action-slot .toolbar-left {
+      display: flex !important;
+      align-items: center !important;
+      flex-wrap: wrap !important;
+      gap: 8px !important;
+      min-width: 0 !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-action-slot .toolbar-left > * {
+      display: inline-flex !important;
+      align-items: center !important;
+      min-width: 24px !important;
+      min-height: 28px !important;
+      color: var(--bewly-widescreen-text-secondary) !important;
+      font-size: var(--bew-font-size-caption, 12px) !important;
+      line-height: var(--bew-line-height-caption, 16px) !important;
+      white-space: nowrap !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-action-slot .toolbar-left > *:hover {
+      color: var(--bew-theme-color, #00aeec) !important;
+    }
+
+    #${ROOT_ID} .bewly-widescreen-action-slot .toolbar-right {
+      display: none !important;
     }
 
     #${ROOT_ID} .bewly-widescreen-action-slot #arc_toolbar_report {
@@ -2762,8 +2910,14 @@ function fillSidebar(currentState: BewlyWidescreenState) {
   syncSidebarTitle(currentState)
 
   moveOrReplaceNode(selectors.info, currentState.infoSlot, currentState.movedNodes)
+  const movedMediaInfo = currentState.infoSlot.querySelector<HTMLElement>('[class*="mediainfo_mediaInfoWrap"]')
+  if (movedMediaInfo)
+    bindReactEventBridge(movedMediaInfo)
 
   moveOrReplaceNode(selectors.toolbar, currentState.toolbarSlot, currentState.movedNodes)
+  const movedToolbar = currentState.toolbarSlot.querySelector<HTMLElement>('.toolbar')
+  if (movedToolbar)
+    bindReactEventBridge(movedToolbar)
 
   moveOrReplaceNode(selectors.upPanel, currentState.upSlot, currentState.movedNodes)
 
