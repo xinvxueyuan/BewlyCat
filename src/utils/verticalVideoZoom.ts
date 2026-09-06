@@ -54,13 +54,14 @@ function injectStyle() {
   styleEl = injectCSS(`
     .${HOST_CLASS} {
       position: relative !important;
+      --bewly-vertical-video-controls-top: max(var(--bew-space-12, 48px), calc(var(--bewly-vertical-video-issue-bottom, 0px) + var(--bew-space-3, 12px)));
     }
 
     .${BUTTON_CLASS} {
       position: absolute !important;
-      top: 12px !important;
-      left: 12px !important;
-      right: auto !important;
+      top: var(--bewly-vertical-video-controls-top) !important;
+      left: auto !important;
+      right: var(--bew-space-3, 12px) !important;
       z-index: 100 !important;
       display: none;
       align-items: center !important;
@@ -89,8 +90,8 @@ function injectStyle() {
 
     .${CONTROL_CLASS} {
       position: absolute !important;
-      top: 92px !important;
-      right: 12px !important;
+      top: calc(var(--bewly-vertical-video-controls-top) + 32px + var(--bew-space-6, 24px)) !important;
+      right: var(--bew-space-3, 12px) !important;
       z-index: 100 !important;
       display: none;
       align-items: center !important;
@@ -252,7 +253,40 @@ function hideControls(host: HTMLElement) {
 function bindHostActivity(host: HTMLElement) {
   hostActivityCleanup?.()
 
-  const onPointerActivity = () => showControlsTemporarily(host)
+  let positionFrame: number | null = null
+  const schedulePositionUpdate = () => {
+    if (positionFrame !== null)
+      return
+
+    positionFrame = requestAnimationFrame(() => {
+      positionFrame = null
+      const issue = host.querySelector<HTMLElement>('.bpx-player-top-issue')
+      const issueRect = issue?.getBoundingClientRect()
+      // Keep the reserved space when the player's toolbar temporarily hides.
+      if (!issueRect?.height)
+        return
+
+      const hostRect = host.getBoundingClientRect()
+      const scaleY = host.offsetHeight ? hostRect.height / host.offsetHeight : 1
+      if (!scaleY)
+        return
+
+      const bottom = Math.max(0, (issueRect.bottom - hostRect.top) / scaleY - host.clientTop)
+      const value = `${Math.ceil(bottom)}px`
+      if (host.style.getPropertyValue('--bewly-vertical-video-issue-bottom') !== value)
+        host.style.setProperty('--bewly-vertical-video-issue-bottom', value)
+    })
+  }
+  const resizeObserver = new ResizeObserver(schedulePositionUpdate)
+  resizeObserver.observe(host)
+  window.addEventListener('resize', schedulePositionUpdate)
+  document.addEventListener('fullscreenchange', schedulePositionUpdate)
+  schedulePositionUpdate()
+
+  const onPointerActivity = () => {
+    showControlsTemporarily(host)
+    schedulePositionUpdate()
+  }
   const onPointerLeave = () => hideControls(host)
   host.addEventListener('pointerenter', onPointerActivity)
   host.addEventListener('pointermove', onPointerActivity)
@@ -260,6 +294,12 @@ function bindHostActivity(host: HTMLElement) {
   host.addEventListener('pointerleave', onPointerLeave)
 
   hostActivityCleanup = () => {
+    resizeObserver.disconnect()
+    window.removeEventListener('resize', schedulePositionUpdate)
+    document.removeEventListener('fullscreenchange', schedulePositionUpdate)
+    if (positionFrame !== null)
+      cancelAnimationFrame(positionFrame)
+    host.style.removeProperty('--bewly-vertical-video-issue-bottom')
     host.removeEventListener('pointerenter', onPointerActivity)
     host.removeEventListener('pointermove', onPointerActivity)
     host.removeEventListener('pointerdown', onPointerActivity)
