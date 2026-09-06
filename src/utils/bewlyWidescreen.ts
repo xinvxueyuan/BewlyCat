@@ -44,7 +44,9 @@ interface BewlyWidescreenState {
   resizeObserver?: ResizeObserver
   mutationObserver?: MutationObserver
   metadataListener?: () => void
-  resizeSyncTimers?: Array<ReturnType<typeof setTimeout>>
+  resizeSyncFrame?: number
+  lastPlayerWidth?: number
+  lastPlayerHeight?: number
   sidebarInteractionCleanup?: () => void
   sidebarToggleAutoHideCleanup?: () => void
   descriptionCleanup?: () => void
@@ -2618,23 +2620,30 @@ function syncActionAnimationTheme(currentState: BewlyWidescreenState) {
 }
 
 function clearPlayerResizeSync(currentState: BewlyWidescreenState) {
-  currentState.resizeSyncTimers?.forEach(timer => clearTimeout(timer))
-  currentState.resizeSyncTimers = []
+  if (currentState.resizeSyncFrame !== undefined)
+    cancelAnimationFrame(currentState.resizeSyncFrame)
+  currentState.resizeSyncFrame = undefined
 }
 
 function schedulePlayerResizeSync(currentState: BewlyWidescreenState) {
-  if (!state || state !== currentState)
+  if (state !== currentState || currentState.resizeSyncFrame !== undefined)
     return
 
-  clearPlayerResizeSync(currentState)
-  currentState.resizeSyncTimers = [0, 80, 180, 360, 720].map(delay =>
-    setTimeout(() => {
-      if (!state || state !== currentState || isPlayerShowingEndingRecommendation())
-        return
+  // 多个布局来源合并为一帧，且只有播放器尺寸真正变化时才通知原站。
+  // 避免每次 ResizeObserver 回调都向整页广播五轮 resize。
+  currentState.resizeSyncFrame = requestAnimationFrame(() => {
+    currentState.resizeSyncFrame = undefined
+    if (state !== currentState || isPlayerShowingEndingRecommendation())
+      return
 
-      window.dispatchEvent(new Event('resize'))
-    }, delay),
-  )
+    const { width, height } = currentState.playerSlot.getBoundingClientRect()
+    if (width === currentState.lastPlayerWidth && height === currentState.lastPlayerHeight)
+      return
+
+    currentState.lastPlayerWidth = width
+    currentState.lastPlayerHeight = height
+    window.dispatchEvent(new Event('resize'))
+  })
 }
 
 function setupAspectObservers(currentState: BewlyWidescreenState) {
@@ -2654,6 +2663,7 @@ function setupAspectObservers(currentState: BewlyWidescreenState) {
     syncDescription(currentState)
   })
   currentState.resizeObserver.observe(currentState.root)
+  currentState.resizeObserver.observe(currentState.playerSlot)
   currentState.resizeObserver.observe(currentState.danmakuDock)
   currentState.resizeObserver.observe(currentState.descriptionSlot)
   updateAspectRatio()
@@ -3033,9 +3043,7 @@ function cleanupState(currentState: BewlyWidescreenState) {
   currentState.root.remove()
   currentState.styleEl.remove()
   document.body.classList.remove(BODY_CLASS)
-  // Force a layout pass so the same click can apply Bilibili's native mode
-  // against the restored player instead of the widescreen frame.
-  void document.body.offsetHeight
+  // DOM 已恢复；由原生模式切换按需读取布局，避免在捕获阶段强制整页回流。
   setTimeout(() => window.dispatchEvent(new Event('resize')), 0)
 }
 

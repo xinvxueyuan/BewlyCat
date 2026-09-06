@@ -984,6 +984,10 @@ export function enableRandomPlay(): void {
   // 监听DOM变化，如果主播放器视频被替换，重新设置监听器
   videoObserver?.disconnect()
   videoObserver = new MutationObserver(() => {
+    // 弹幕、计时和控件更新都不需要重新查找仍在页面内的主视频。
+    if (listenerVideo?.isConnected)
+      return
+
     const video = getVideoElement()
     if (video && !video.hasAttribute('data-bewly-random-play-listener')) {
       setupVideoListener()
@@ -1229,9 +1233,15 @@ export function observeRandomPlayPageChanges(): void {
   if (pageChangeObserver)
     return
 
-  pageChangeObserver = new MutationObserver(() => {
+  pageChangeObserver = new MutationObserver((mutations) => {
     if (!isCustomPlayPage() || !settings.value.enableRandomPlay)
       return
+
+    // 播放器内部的弹幕、计时、菜单和全屏控件变化不会替换页面播放列表。
+    if (mutations.every(mutation => mutation.target instanceof Element
+      && mutation.target.closest('.bpx-player-container, .bilibili-player'))) {
+      return
+    }
 
     // 使用防抖避免频繁触发
     if (pageChangeDebounceTimer !== null)

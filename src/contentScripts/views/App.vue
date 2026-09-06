@@ -221,20 +221,6 @@ function getPageParam(): AppPage | null {
 
 const activatedPage = ref<AppPage>(getPageParam() || (settings.value.dockItemsConfig.find(e => e.visible === true)?.page || AppPage.Home))
 
-// 监听 URL 变化,同步更新 activatedPage
-useEventListener(window, 'pushstate', () => {
-  const pageParam = getPageParam()
-  if (pageParam && pageParam !== activatedPage.value) {
-    activatedPage.value = pageParam
-  }
-})
-useEventListener(window, 'popstate', () => {
-  const pageParam = getPageParam()
-  if (pageParam && pageParam !== activatedPage.value) {
-    activatedPage.value = pageParam
-  }
-})
-
 // 清理搜索相关的URL参数（仅在首页生效）
 function clearSearchParamsFromUrl() {
   // 只在首页清理搜索参数，避免影响其他B站页面（如搜索结果页）
@@ -285,10 +271,36 @@ function getDefaultHomeSubPage(tabConfig: { page: HomeSubPage, visible: boolean 
   return HomeSubPage.ForYou
 }
 
-// 添加Home页面的子页面状态
-const homeActivatedPage = ref<HomeSubPage>(getDefaultHomeSubPage(settings.value.homePageTabVisibilityList))
-const homeActivatedPageTouched = ref<boolean>(false)
+function getHomeTabParam(url = new URL(window.location.href)): HomeSubPage | null {
+  const tab = url.searchParams.get('tab') as HomeSubPage | null
+  return isHomePage(url.href) && url.searchParams.get('page') === AppPage.Home
+    && tab && Object.values(HomeSubPage).includes(tab)
+    ? tab
+    : null
+}
+
+// URL 中的显式 tab 优先于设置中的默认首页标签。
+const initialHomeTab = getHomeTabParam()
+const homeActivatedPage = ref<HomeSubPage>(initialHomeTab ?? getDefaultHomeSubPage(settings.value.homePageTabVisibilityList))
+const homeActivatedPageTouched = ref<boolean>(initialHomeTab !== null)
 const isHomeTabSwitching = ref<boolean>(false)
+
+function syncNavigationFromUrl() {
+  // 注入层的 pushstate 事件在原生方法执行前派发，延后读取最终地址。
+  queueMicrotask(() => {
+    const page = getPageParam()
+    if (page)
+      activatedPage.value = page
+    if (page === AppPage.Home) {
+      const tab = getHomeTabParam()
+      homeActivatedPage.value = tab ?? getDefaultHomeSubPage(settings.value.homePageTabVisibilityList)
+      homeActivatedPageTouched.value = tab !== null
+    }
+  })
+}
+useEventListener(window, 'pushstate', syncNavigationFromUrl)
+useEventListener(window, 'popstate', syncNavigationFromUrl)
+
 watch(
   () => settings.value.homePageTabVisibilityList,
   (tabConfig) => {
@@ -1269,14 +1281,27 @@ function focusScrollViewport(options: { force?: boolean } = {}) {
 }
 
 const isFirstTimeActivatedPageChange = ref<boolean>(true)
+function syncNavigationUrl() {
+  const url = new URL(window.location.href)
+  url.searchParams.set('page', activatedPage.value)
+  if (activatedPage.value === AppPage.Home)
+    url.searchParams.set('tab', homeActivatedPage.value)
+  else
+    url.searchParams.delete('tab')
+  if (url.href !== window.location.href)
+    window.history.replaceState(window.history.state, '', url.href)
+}
+
+watch(homeActivatedPage, () => {
+  if (isHomePage() && activatedPage.value === AppPage.Home)
+    syncNavigationUrl()
+}, { immediate: true })
+
 watch(
   () => activatedPage.value,
   () => {
     if (!isFirstTimeActivatedPageChange.value) {
-      // Update the URL query parameter when activatedPage changes
-      const url = new URL(window.location.href)
-      url.searchParams.set('page', activatedPage.value)
-      window.history.replaceState({}, '', url.toString())
+      syncNavigationUrl()
     }
 
     scrollViewportRef.value?.scrollTo({ top: 0 })
@@ -1699,10 +1724,13 @@ if (settings.value.cleanUrlArgument) {
 
     try {
       isCleaningUrl = true
+      const sourceUrl = window.location.href
       const currentUrl = new URL(window.location.href)
       let hasChanged = false
 
       for (const param of BASE_PARAMS_TO_REMOVE) {
+        if (param === 'tab' && getHomeTabParam(currentUrl))
+          continue
         if (currentUrl.searchParams.has(param)) {
           currentUrl.searchParams.delete(param)
           hasChanged = true
@@ -1724,20 +1752,22 @@ if (settings.value.cleanUrlArgument) {
           .replace(/%3D/gi, '=')
           .replace(/%26/g, '&')
 
+        const applyCleanUrl = () => {
+          // 空闲回调执行前可能已切换 tab，旧地址不能覆盖新的导航状态。
+          if (window.location.href === sourceUrl) {
+            history.replaceState(history.state, '', newUrl)
+            lastCleanedUrl = window.location.href
+          }
+          isCleaningUrl = false
+          if (window.location.href !== newUrl)
+            scheduleCleanup()
+        }
         // 使用 requestIdleCallback 来避免阻塞页面加载
         if (window.requestIdleCallback) {
-          window.requestIdleCallback(() => {
-            history.replaceState(null, '', newUrl)
-            lastCleanedUrl = window.location.href
-            isCleaningUrl = false
-          })
+          window.requestIdleCallback(applyCleanUrl)
         }
         else {
-          setTimeout(() => {
-            history.replaceState(null, '', newUrl)
-            lastCleanedUrl = window.location.href
-            isCleaningUrl = false
-          }, 0)
+          setTimeout(applyCleanUrl, 0)
         }
       }
       else {

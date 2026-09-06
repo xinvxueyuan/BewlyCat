@@ -10,11 +10,11 @@ interface SettingsAction extends ContextMenuOption {
 }
 
 type BooleanSetting = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings]
-type ToggleDefinition = [key: BooleanSetting, title: string]
+type ToggleDefinition = [key: BooleanSetting, title: string, icon?: string]
 
 const toggles: ToggleDefinition[] = [
-  ['showBewlyOrBiliPageSwitcher', 'settings.show_bewly_or_bili_page_switcher'],
-  ['showBewlyOrBiliPageSwitcherOnMorePages', 'settings.show_bewly_or_bili_page_switcher_on_more_pages'],
+  ['showBewlyOrBiliPageSwitcher', 'settings.show_bewly_or_bili_page_switcher', 'i-mingcute:refresh-2-line'],
+  ['showBewlyOrBiliPageSwitcherOnMorePages', 'settings.show_bewly_or_bili_page_switcher_on_more_pages', 'i-mingcute:refresh-2-line'],
   ['showHotSearchInTopBar', 'settings.show_hot_search_in_top_bar'],
   ['showSearchRecommendation', 'settings.show_search_recommendation'],
   ['autoHideTopBar', 'settings.auto_hide_top_bar'],
@@ -35,14 +35,14 @@ const toggles: ToggleDefinition[] = [
 ]
 
 const components = [
-  ['moments', 'topbar.moments'],
-  ['favorites', 'topbar.favorites'],
-  ['history', 'topbar.history'],
-  ['watchLater', 'topbar.watch_later'],
-  ['creatorCenter', 'topbar.creative_center'],
-  ['upload', 'topbar.upload'],
-  ['notifications', 'topbar.notifications'],
-  ['topBarSwitcher', 'topbar.top_bar_switcher'],
+  ['moments', 'topbar.moments', 'i-tabler:windmill'],
+  ['favorites', 'topbar.favorites', 'i-mingcute:star-line'],
+  ['history', 'topbar.history', 'i-mingcute:time-line'],
+  ['watchLater', 'topbar.watch_later', 'i-mingcute:carplay-line'],
+  ['creatorCenter', 'topbar.creative_center', 'i-mingcute:bulb-line'],
+  ['upload', 'topbar.upload', 'i-mingcute:upload-line'],
+  ['notifications', 'topbar.notifications', 'i-tabler:bell'],
+  ['topBarSwitcher', 'topbar.top_bar_switcher', 'i-mingcute:refresh-2-line'],
 ] as const
 
 export function getElementSettingsActions(
@@ -57,7 +57,7 @@ export function getElementSettingsActions(
   const dockContainer = target.secondaryPage === 'dock' && title === 'settings.group_dock'
   const topBarContainer = topBar && ['settings.topbar_visibility', 'settings.topbar_actions'].includes(title ?? '')
 
-  for (const [key, label] of toggles) {
+  for (const [key, label, icon] of toggles) {
     const inGroup = (topBarContainer && ['showBewlyOrBiliPageSwitcher', 'autoHideTopBar'].includes(key))
       || (topBar && title === 'settings.show_hot_search_in_top_bar' && key === 'showSearchRecommendation')
       || (dockContainer && ['autoHideDock', 'halfHideDock', 'disableLightDarkModeSwitcherOnDock', 'disableDockGlowingEffect', 'alwaysShowDockActionsWhenAutoHide'].includes(key))
@@ -69,7 +69,7 @@ export function getElementSettingsActions(
     actions.push({
       value: key,
       label: translate(label),
-      icon: 'i-mingcute:settings-3-line',
+      icon: icon ?? 'i-mingcute:settings-3-line',
       checked: settings.value[key],
       run: () => { settings.value[key] = !settings.value[key] },
     })
@@ -139,7 +139,7 @@ export function getElementSettingsActions(
   if (!topBar)
     return actions
 
-  for (const [key, label] of components) {
+  for (const [key, label, icon] of components) {
     if (title !== label && !topBarContainer)
       continue
 
@@ -155,7 +155,7 @@ export function getElementSettingsActions(
     actions.push({
       value: `visible:${key}`,
       label: topBarContainer ? translate(label) : translate('settings.visibility'),
-      icon: 'i-mingcute:eye-line',
+      icon,
       checked: isComponentVisible(key),
       run: () => { ensureConfig().visible = !isComponentVisible(key) },
     })

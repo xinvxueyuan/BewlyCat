@@ -68,11 +68,15 @@ function handleContextMenu(event: MouseEvent) {
 function select(value: string | number) {
   const navigation = target.value
   const action = actions.value.find(action => action.value === value)
-  close()
-  if (value === 'settings' && navigation)
+  if (value === 'settings' && navigation) {
+    close()
     openSettings(navigation)
-  else
-    action?.run()
+    return
+  }
+
+  action?.run()
+  if (action?.checked === undefined)
+    close()
 }
 
 useEventListener(document, 'keydown', (event) => {

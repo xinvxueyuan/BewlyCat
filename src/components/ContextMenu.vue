@@ -90,7 +90,8 @@ function dismissFromPointer() {
 
 function selectOption(option: ContextMenuOption) {
   emit('select', option.value)
-  emit('close')
+  if (option.checked === undefined)
+    emit('close')
 }
 
 function handleKeydown(event: KeyboardEvent) {
