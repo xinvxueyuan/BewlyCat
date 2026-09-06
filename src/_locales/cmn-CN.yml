@@ -727,6 +727,8 @@ settings:
   recommendation_mode: 推荐模式
   recommendation_mode_desc: |
     Web：普通网页端推荐模式。无 Cookie：请求首页推荐时不携带 Cookie。App：移动端推荐模式，需先授权 access key。
+  show_recommendation_mode_switcher: 显示推荐模式快速切换按钮组
+  show_recommendation_mode_switcher_desc: 选中首页“个性推荐”时，在顶部标签栏右侧显示胶囊按钮组，可直接选择 Web、无 Cookie 或 App 模式。
   recommendation_mode_web_no_cookie: 无 Cookie
   remember_no_cookie_recommendation_state: 减少无 Cookie 推荐重复
   remember_no_cookie_recommendation_state_desc: 刷新页面后延续推荐刷新进度，并向推荐接口带上最近曝光记录，以减少重复推荐。仅无 Cookie 模式生效。

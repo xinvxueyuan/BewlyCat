@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useThrottleFn } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
 
 import Icon from '~/components/Icon.vue'
 import LiquidSegmentIndicator from '~/components/LiquidSegmentIndicator.vue'
@@ -8,6 +9,7 @@ import { provideHomeTabCache } from '~/composables/useHomeTabState'
 import { useLayoutEditMode } from '~/composables/useLayoutEditMode'
 import { OVERLAY_SCROLL_BAR_SCROLL, TOP_BAR_VISIBILITY_CHANGE } from '~/constants/globalEvents'
 import { gridLayout, settings } from '~/logic'
+import type { RecommendationMode } from '~/logic/storage'
 import type { ForYouState } from '~/stores/forYouStore'
 import { useForYouStore } from '~/stores/forYouStore'
 import type { HomeTab } from '~/stores/mainStore'
@@ -22,6 +24,7 @@ import { HomeSubPage } from './types'
 const mainStore = useMainStore()
 const topBarStore = useTopBarStore()
 const forYouStore = useForYouStore()
+const { t } = useI18n()
 const { isLayoutEditing } = useLayoutEditMode()
 const {
   handleBackToTop,
@@ -73,7 +76,13 @@ const currentTabs = ref<HomeTab[]>([])
 const tabPageRef = ref()
 const topBarVisibility = ref<boolean>(true)
 const shouldShowHomeTabs = computed(() => currentTabs.value.length > 1)
-const shouldShowHomeHeader = computed(() => shouldShowHomeTabs.value || settings.value.enableGridLayoutSwitcher)
+const shouldShowRecommendationModeSwitcher = computed(() => settings.value.showRecommendationModeSwitcher && activatedPage.value === HomeSubPage.ForYou)
+const shouldShowHomeHeader = computed(() => shouldShowHomeTabs.value || shouldShowRecommendationModeSwitcher.value || settings.value.enableGridLayoutSwitcher)
+const recommendationModeOptions = computed<{ label: string, value: RecommendationMode }[]>(() => [
+  { label: 'Web', value: 'web' },
+  { label: t('settings.recommendation_mode_web_no_cookie'), value: 'webNoCookie' },
+  { label: 'App', value: 'app' },
+])
 const gridLayoutIcons = computed((): GridLayoutIcon[] => {
   return [
     { icon: 'mingcute:table-3-line', iconActivated: 'mingcute:table-3-fill', value: 'adaptive' },
@@ -335,6 +344,7 @@ function toggleTabContentLoading(loading: boolean) {
         class="home-header"
         :class="{
           'home-header--tabs-center': settings.homeTabsPosition === 'center',
+          'home-header--recommendation-switcher': shouldShowRecommendationModeSwitcher,
           'home-header-fixed': settings.fixedHomeTabsOnHomePage,
         }"
         w-full z-9
@@ -375,40 +385,73 @@ function toggleTabContentLoading(loading: boolean) {
           </div>
         </section>
 
-        <div
-          v-if="isLayoutEditing || settings.enableGridLayoutSwitcher"
-          class="glass-panel home-grid-layout-switcher bew-segment-control bew-segment-control--surface"
-          data-layout-edit-target="home-grid-layout-switcher"
-          data-layout-settings-menu="General"
-          data-layout-settings-title-key="settings.enable_grid_layout_switcher"
-          :class="{
-            'bew-segment-control--static': !settings.enableLiquidSegmentIndicator,
-            'bew-segment-control--solid': !settings.enableFrostedGlass,
-          }"
-          flex="~ shrink-0 items-center"
-          box-border
-        >
-          <LiquidSegmentIndicator
-            v-if="settings.enableLiquidSegmentIndicator"
-            ref="gridIndicatorRef"
-            :active-key="gridLayout.home"
-          />
-          <button
-            v-for="icon in gridLayoutIcons" :key="icon.value"
-            type="button"
-            class="home-grid-layout-item bew-segment-control__item bew-segment-control__item--icon"
-            data-segment-item
-            :data-active="gridLayout.home === icon.value ? 'true' : undefined"
-            :aria-pressed="gridLayout.home === icon.value"
-            :title="icon.value"
-            @click="gridLayout.home = icon.value"
+        <div class="home-header-actions">
+          <div
+            v-if="shouldShowRecommendationModeSwitcher"
+            class="glass-panel home-recommendation-mode-switcher bew-segment-control bew-segment-control--surface"
+            :class="{
+              'bew-segment-control--static': !settings.enableLiquidSegmentIndicator,
+              'bew-segment-control--solid': !settings.enableFrostedGlass,
+            }"
+            role="group"
+            :aria-label="$t('settings.recommendation_mode')"
+            data-layout-settings-menu="BewlyPages"
+            data-layout-settings-page="home"
+            data-layout-settings-title-key="settings.show_recommendation_mode_switcher"
           >
-            <Icon
-              class="home-grid-layout-item__icon bew-segment-control__icon"
-              :icon="gridLayout.home === icon.value ? icon.iconActivated : icon.icon"
-              aria-hidden="true"
+            <LiquidSegmentIndicator
+              v-if="settings.enableLiquidSegmentIndicator"
+              :active-key="settings.recommendationMode"
             />
-          </button>
+            <button
+              v-for="option in recommendationModeOptions"
+              :key="option.value"
+              type="button"
+              class="bew-segment-control__item"
+              data-segment-item
+              :data-active="settings.recommendationMode === option.value ? 'true' : undefined"
+              :aria-pressed="settings.recommendationMode === option.value"
+              @click="settings.recommendationMode = option.value"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+
+          <div
+            v-if="isLayoutEditing || settings.enableGridLayoutSwitcher"
+            class="glass-panel home-grid-layout-switcher bew-segment-control bew-segment-control--surface"
+            data-layout-edit-target="home-grid-layout-switcher"
+            data-layout-settings-menu="General"
+            data-layout-settings-title-key="settings.enable_grid_layout_switcher"
+            :class="{
+              'bew-segment-control--static': !settings.enableLiquidSegmentIndicator,
+              'bew-segment-control--solid': !settings.enableFrostedGlass,
+            }"
+            flex="~ shrink-0 items-center"
+            box-border
+          >
+            <LiquidSegmentIndicator
+              v-if="settings.enableLiquidSegmentIndicator"
+              ref="gridIndicatorRef"
+              :active-key="gridLayout.home"
+            />
+            <button
+              v-for="icon in gridLayoutIcons" :key="icon.value"
+              type="button"
+              class="home-grid-layout-item bew-segment-control__item bew-segment-control__item--icon"
+              data-segment-item
+              :data-active="gridLayout.home === icon.value ? 'true' : undefined"
+              :aria-pressed="gridLayout.home === icon.value"
+              :title="icon.value"
+              @click="gridLayout.home = icon.value"
+            >
+              <Icon
+                class="home-grid-layout-item__icon bew-segment-control__icon"
+                :icon="gridLayout.home === icon.value ? icon.iconActivated : icon.icon"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -488,21 +531,30 @@ function toggleTabContentLoading(loading: boolean) {
   justify-self: start;
 }
 
-.home-grid-layout-switcher {
+.home-header-actions {
   grid-column: 2;
   justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--bew-space-4);
+
+  > .bew-segment-control {
+    flex-shrink: 0;
+  }
 }
 
 .home-header--tabs-center {
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  // Reserve the actions' intrinsic width before allowing the tabs to scroll.
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(max-content, 1fr);
 
   .home-tabs-panel {
     grid-column: 2;
-    max-width: calc(100vw - 320px);
+    max-width: 100%;
     justify-self: center;
   }
 
-  .home-grid-layout-switcher {
+  .home-header-actions {
     grid-column: 3;
   }
 }
@@ -540,8 +592,24 @@ function toggleTabContentLoading(loading: boolean) {
       max-width: 100%;
     }
 
-    .home-grid-layout-switcher {
+    .home-header-actions {
       grid-column: 2;
+    }
+  }
+}
+
+@media (max-width: 600px) {
+  .home-header--recommendation-switcher {
+    grid-template-columns: minmax(0, 1fr);
+
+    .home-tabs-panel,
+    .home-header-actions {
+      grid-column: 1;
+    }
+
+    .home-header-actions {
+      max-width: 100%;
+      flex-wrap: wrap;
     }
   }
 }

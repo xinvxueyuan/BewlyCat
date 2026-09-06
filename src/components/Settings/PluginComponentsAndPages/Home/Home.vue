@@ -173,6 +173,14 @@ function handleToggleHomeTab(tab: any) {
       </SettingsItem>
 
       <SettingsItem
+        :title="$t('settings.show_recommendation_mode_switcher')"
+        :desc="$t('settings.show_recommendation_mode_switcher_desc')"
+        right-width="auto"
+      >
+        <Radio v-model="settings.showRecommendationModeSwitcher" />
+      </SettingsItem>
+
+      <SettingsItem
         v-if="settings.recommendationMode === 'webNoCookie'"
         :title="$t('settings.remember_no_cookie_recommendation_state')"
         :desc="$t('settings.remember_no_cookie_recommendation_state_desc')"

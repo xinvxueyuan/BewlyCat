@@ -632,6 +632,8 @@ settings:
   recommendation_mode: 推介模式
   recommendation_mode_desc: |
     Web：普通網頁版推介模式。無 Cookie：請求首頁推介時唔帶 Cookie。App：手機版推介模式，要先授權 access key。
+  show_recommendation_mode_switcher: 顯示推介模式快速切換掣組
+  show_recommendation_mode_switcher_desc: 揀咗主頁「估你心水」嗰陣，喺頂部分頁欄右邊顯示膠囊掣組，可以直接揀 Web、無 Cookie 或 App 模式。
   recommendation_mode_web_no_cookie: 無 Cookie
   remember_no_cookie_recommendation_state: 減少無 Cookie 推介重複
   remember_no_cookie_recommendation_state_desc: 重新整理頁面後，會延續推介刷新進度，並向推介接口帶上最近曝光記錄，以減少重複推介。淨係無 Cookie 模式生效。

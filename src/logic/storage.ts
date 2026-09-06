@@ -421,6 +421,7 @@ export interface Settings {
   searchResultsPaginationMode: 'scroll' | 'pagination' // 搜索结果分页模式：滚动加载或翻页
 
   recommendationMode: RecommendationMode
+  showRecommendationModeSwitcher: boolean
   autoSwitchRecommendationMode: boolean
 
   // filter setting
@@ -722,6 +723,7 @@ export const originalSettings: Settings = {
   searchResultsPaginationMode: 'scroll', // 默认使用滚动加载
 
   recommendationMode: 'web',
+  showRecommendationModeSwitcher: false,
   autoSwitchRecommendationMode: true,
 
   // filter setting
