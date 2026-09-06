@@ -998,6 +998,7 @@ function handleAdditionalClick(event: MouseEvent) {
         <VideoCardContextMenu
           :video="menuVideo"
           :context-menu-styles="videoOptionsFloatingStyles"
+          hide-block-user
           @close="closeVideoOptions"
           @removed="closeVideoOptions"
         />

@@ -20,9 +20,11 @@ const props = withDefaults(defineProps<{
   video: Video
   contextMenuStyles: CSSProperties
   isFollowingPage?: boolean
+  hideBlockUser?: boolean
   triggerElement?: HTMLElement | null
 }>(), {
   isFollowingPage: false,
+  hideBlockUser: false,
 })
 const emit = defineEmits<{
   (event: 'removed', selectedOpt?: { reasonId?: number, feedbackId?: number }): void
@@ -127,6 +129,15 @@ const videoOptions = computed(() => [
   { id: 1, key: 'notInterested' as const, name: t('video_card.operation.not_interested') },
   { id: 2, key: 'notInterestedUploader' as const, name: t('video_card.operation.not_interested_uploader') },
 ].filter(option => isOptionVisible(option.key)))
+const appVideoOptions = computed(() => (props.video.threePointV2 ?? []).filter(option =>
+  option.type !== ThreePointV2Type.WatchLater
+  && option.type !== ThreePointV2Type.Feedback
+  && (option.type !== ThreePointV2Type.Dislike || isOptionVisible('notInterested')),
+))
+const hasRecommendationOptions = computed(() =>
+  (getVideoType() === 'rcmd' && videoOptions.value.length > 0)
+  || (getVideoType() === 'appRcmd' && appVideoOptions.value.length > 0),
+)
 const showContextMenu = ref<boolean>(false)
 const showDislikeDialog = ref<boolean>(false)
 const showBlockUserDialog = ref<boolean>(false)
@@ -223,8 +234,8 @@ const commonOptions = computed((): OptionItem[][] => {
     }
   }
 
-  // 添加拉黑用户选项；缺少作者 mid 时隐藏，避免点击后发出无效请求。
-  if (authorMid) {
+  // 已关注的 UP 主、正在关注页、动态及缺少作者 mid 的卡片隐藏拉黑选项。
+  if (authorMid && authorFollowed !== true && !props.isFollowingPage && !props.hideBlockUser) {
     result.push([
       { command: VideoOption.BlockUser, key: 'blockUser', name: t('video_card.operation.block_user'), icon: 'i-solar:user-block-bold-duotone', color: 'text-red-500' },
     ])
@@ -566,29 +577,21 @@ async function unfollowUser() {
           @scroll="handleScroll"
           @keydown="handleMenuKeydown"
         >
-          <!-- 现有内容不变 -->
           <template v-if="getVideoType() === 'appRcmd'">
-            <template v-for="option in video.threePointV2" :key="option.type">
-              <li
-                v-if="option.type !== ThreePointV2Type.WatchLater
-                  && option.type !== ThreePointV2Type.Feedback
-                  && (option.type !== ThreePointV2Type.Dislike || isOptionVisible('notInterested'))"
-                role="none"
+            <li v-for="option in appVideoOptions" :key="option.type" role="none">
+              <button
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                class="context-menu-item"
+                @focus="setActiveMenuItem"
+                @click="handleAppMoreCommand(option.type)"
               >
-                <button
-                  type="button"
-                  role="menuitem"
-                  tabindex="-1"
-                  class="context-menu-item"
-                  @focus="setActiveMenuItem"
-                  @click="handleAppMoreCommand(option.type)"
-                >
-                  <i class="item-icon" i-solar:confounded-circle-bold-duotone />
-                  <span v-if="option.type === ThreePointV2Type.Dislike">{{ $t('video_card.operation.not_interested') }}</span>
-                  <span v-else>{{ option.title }}</span>
-                </button>
-              </li>
-            </template>
+                <i class="item-icon" i-solar:confounded-circle-bold-duotone />
+                <span v-if="option.type === ThreePointV2Type.Dislike">{{ $t('video_card.operation.not_interested') }}</span>
+                <span v-else>{{ option.title }}</span>
+              </button>
+            </li>
           </template>
           <template v-else-if="getVideoType() === 'rcmd'">
             <li
@@ -605,7 +608,7 @@ async function unfollowUser() {
             </li>
           </template>
 
-          <div v-if="getVideoType() === 'rcmd' && videoOptions.length > 0 && commonOptions.length > 0" class="divider" />
+          <div v-if="hasRecommendationOptions && commonOptions.length > 0" class="divider" role="separator" />
 
           <template v-for="(optionGroup, index) in commonOptions" :key="index">
             <li
@@ -622,7 +625,7 @@ async function unfollowUser() {
               </button>
             </li>
 
-            <div v-if="index !== commonOptions.length - 1" class="divider" />
+            <div v-if="index !== commonOptions.length - 1" class="divider" role="separator" />
           </template>
         </ul>
 
@@ -733,6 +736,8 @@ async function unfollowUser() {
 .divider {
   --uno: "w-full h-1px bg-$bew-border-color";
 
+  // 菜单限高并滚动时仍保留完整的 1px 分割线。
+  flex-shrink: 0;
   margin: var(--bew-space-1) 0;
 }
 
