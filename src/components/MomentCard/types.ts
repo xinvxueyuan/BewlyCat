@@ -8,6 +8,7 @@ export interface DisplayRichTextSegment {
 
 export interface DisplayForwardVideo {
   title: string
+  desc?: string
   cover: string
   duration: string
   play: string
@@ -113,6 +114,8 @@ export interface DisplayMoment {
   forward?: {
     author: string
     authorMid?: string
+    authorFace?: string
+    authorAction?: string
     title: string
     text: string
     fallback: string

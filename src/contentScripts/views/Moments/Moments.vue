@@ -1801,6 +1801,8 @@ function mapMoment(item: DataItem): DisplayMoment {
       ? {
           author: forwardedAuthor.name || t('moments.original_author'),
           authorMid: String(forwardedAuthor.mid || ''),
+          authorFace: httpsUrl(forwardedAuthor.face || ''),
+          authorAction: forwardedAuthor.pub_action || '',
           title: content.title,
           text: content.text,
           fallback: content.isChargeExclusive
@@ -1832,6 +1834,7 @@ function mapMoment(item: DataItem): DisplayMoment {
           video: forwardedArchive
             ? {
                 title: pickText(forwardedArchive.title, content.title),
+                desc: pickText(forwardedArchive.desc),
                 cover: httpsUrl(forwardedArchive.cover || content.images[0] || ''),
                 duration: pickText(forwardedArchive.duration_text, content.duration),
                 play: pickText(forwardedArchive.stat?.play, content.videoPlay),

@@ -196,10 +196,6 @@ const showVideoCoverStats = computed(() =>
   (settings.value.showVideoCardViewCount && Boolean(moment.videoPlay))
   || showVideoDuration.value,
 )
-const showForwardVideoCoverStats = computed(() =>
-  (settings.value.showVideoCardViewCount && Boolean(moment.forward?.video?.play))
-  || showForwardVideoDuration.value,
-)
 
 // The shared context menu expects the same video shape as VideoCard. A dynamic
 // video without a stable aid is intentionally left without a menu instead of
@@ -837,36 +833,63 @@ function handleAdditionalClick(event: MouseEvent) {
                 aria-hidden="true"
               />
             </button>
-            <a
-              v-if="moment.forward?.video"
-              :href="moment.forward.video.url || undefined"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="moment-card__video-card"
-              :aria-label="t('moment_card.open_original_video', { title: moment.forward.video.title })"
-              @click="handleForwardVideoClick"
-            >
-              <MomentVideoStrip
-                :cover="getMomentThumbnailUrl(moment.forward.video.cover)"
-                :cover-alt="moment.forward.video.title"
-                :title="moment.forward.video.title || moment.forward.fallback"
-                :author="moment.forward.author"
-                :author-href="forwardAuthorSpaceUrl"
-                :text-cover-text="moment.forward.fallback"
-                :show-stats="showForwardVideoCoverStats"
-                :show-play="settings.showVideoCardViewCount && Boolean(moment.forward.video.play)"
-                :play="moment.forward.video.play"
-                :show-duration="showForwardVideoDuration"
-                :duration="moment.forward.video.duration"
-                :watched-aid="moment.forward.video.aid"
-                :watched-bvid="moment.forward.video.bvid"
-                :watch-later-enabled="settings.showVideoCardWatchLater && Boolean(getWatchLaterStateKey(moment.forward.video))"
-                :watch-later-added="isWatchLaterAdded(moment.forward.video)"
-                :watch-later-loading="isWatchLaterLoading(moment.forward.video)"
-                @toggle-watch-later="emit('toggleWatchLater', moment.forward.video)"
-                @author-click="handleForwardAuthorClick"
-              />
-            </a>
+            <div v-if="moment.forward?.video" class="moment-card__forward-video">
+              <div class="moment-card__forward-video-header">
+                <component
+                  :is="forwardAuthorSpaceUrl ? 'a' : 'span'"
+                  :href="forwardAuthorSpaceUrl || undefined"
+                  class="moment-card__forward-author moment-card__forward-video-identity"
+                  rel="noopener noreferrer"
+                  @click="handleForwardAuthorClick"
+                >
+                  <img
+                    v-if="moment.forward.authorFace"
+                    :src="getAvatarThumbnailUrl(moment.forward.authorFace)"
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                  >
+                  <span v-else class="moment-card__forward-video-avatar" aria-hidden="true">
+                    <span i-tabler-user />
+                  </span>
+                  <span class="moment-card__forward-video-name">{{ moment.forward.author }}</span>
+                </component>
+                <span class="moment-card__forward-video-action">
+                  {{ moment.forward.authorAction || t('moment_card.video_post') }}
+                </span>
+              </div>
+              <a
+                :href="moment.forward.video.url || undefined"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="moment-card__video-card moment-card__video-card--forward"
+                :aria-label="t('moment_card.open_original_video', { title: moment.forward.video.title })"
+                @click="handleForwardVideoClick"
+              >
+                <MomentVideoStrip
+                  :cover="getMomentThumbnailUrl(moment.forward.video.cover)"
+                  :cover-alt="moment.forward.video.title"
+                  :title="moment.forward.video.title || moment.forward.fallback"
+                  :desc="moment.forward.video.desc"
+                  :author="moment.forward.author"
+                  :text-cover-text="moment.forward.fallback"
+                  stats-in-info
+                  :show-stats="showForwardVideoDuration"
+                  :show-play="settings.showVideoCardViewCount && Boolean(moment.forward.video.play)"
+                  :play="moment.forward.video.play"
+                  :show-danmaku="settings.showVideoCardDanmakuCount && Boolean(moment.forward.video.danmaku)"
+                  :danmaku="moment.forward.video.danmaku"
+                  :show-duration="showForwardVideoDuration"
+                  :duration="moment.forward.video.duration"
+                  :watched-aid="moment.forward.video.aid"
+                  :watched-bvid="moment.forward.video.bvid"
+                  :watch-later-enabled="settings.showVideoCardWatchLater && Boolean(getWatchLaterStateKey(moment.forward.video))"
+                  :watch-later-added="isWatchLaterAdded(moment.forward.video)"
+                  :watch-later-loading="isWatchLaterLoading(moment.forward.video)"
+                  @toggle-watch-later="emit('toggleWatchLater', moment.forward.video)"
+                />
+              </a>
+            </div>
             <div
               v-else-if="moment.forward"
               class="moment-card__forward"
@@ -1654,6 +1677,75 @@ function handleAdditionalClick(event: MouseEvent) {
   background: transparent;
 }
 
+/* 引用层承载原 UP，内层视频卡承载视频信息。 */
+.moment-card__forward-video {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--bew-space-3);
+  margin-top: var(--bew-space-3);
+  padding: var(--bew-space-3);
+  border-radius: var(--bew-card-radius);
+  background: var(--bew-fill-1);
+}
+
+.moment-card__forward-video-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--bew-space-1);
+  font-size: var(--bew-font-size-control);
+  line-height: var(--bew-line-height-control);
+}
+
+.moment-card__forward-video-header .moment-card__forward-video-identity {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--bew-space-1);
+  color: var(--bew-theme-color);
+}
+
+.moment-card__forward-video-identity:hover {
+  text-decoration: underline;
+}
+
+.moment-card__forward-video-identity > img,
+.moment-card__forward-video-avatar {
+  display: grid;
+  width: var(--bew-space-6);
+  height: var(--bew-space-6);
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bew-fill-2);
+  object-fit: cover;
+  font-size: var(--bew-icon-size-sm);
+}
+
+.moment-card__forward-video-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moment-card__forward-video-action {
+  min-width: 0;
+  color: var(--bew-text-2);
+  overflow-wrap: anywhere;
+}
+
+.moment-card__video-card--forward {
+  grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
+  margin-top: 0;
+  background: var(--bew-content-solid);
+}
+
+.moment-card__video-card--forward:hover,
+.moment-card__video-card--forward:focus-visible {
+  background: var(--bew-content-alt-solid);
+}
+
 /* ---- 横条视频卡内容：DOM 在 MomentVideoStrip 子组件内，经 :deep 穿透 ---- */
 .moment-card__video-card :deep(.moment-card__video-card-cover) {
   position: relative;
@@ -1662,6 +1754,18 @@ function handleAdditionalClick(event: MouseEvent) {
   overflow: hidden;
   aspect-ratio: 16 / 9;
   background: #111;
+}
+
+/* 简介撑高信息区时封面跟随整行，避免窄卡片的封面下方留白。 */
+.moment-card__video-card--forward :deep(.moment-card__video-card-cover) {
+  align-self: stretch;
+  aspect-ratio: auto;
+}
+
+.moment-card__video-card--forward :deep(.moment-card__video-card-cover::before) {
+  display: block;
+  padding-top: 56.25%;
+  content: "";
 }
 
 .moment-card__video-card :deep(.moment-card__video-card-cover > img),
@@ -1720,6 +1824,17 @@ function handleAdditionalClick(event: MouseEvent) {
   font-size: var(--bew-font-size-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.moment-card__video-card :deep(.moment-card__video-info-stats) {
+  flex-wrap: wrap;
+  gap: var(--bew-space-2) var(--bew-space-4);
+}
+
+.moment-card__video-card :deep(.moment-card__video-info-stats > span) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bew-space-1);
 }
 
 /* 稍后再看：仅横条视频卡使用，显隐只跟封面 hover 与键盘聚焦 */

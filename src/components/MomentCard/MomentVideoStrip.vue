@@ -22,6 +22,10 @@ defineProps<{
   showStats?: boolean
   showPlay?: boolean
   play?: string
+  /** 转发视频将统计放在信息区底部，封面只保留时长 */
+  statsInInfo?: boolean
+  showDanmaku?: boolean
+  danmaku?: string
   showDuration?: boolean
   duration?: string
   watchedAid?: number | string
@@ -83,7 +87,7 @@ function handlePreviewRef(element: Element | ComponentPublicInstance | null) {
       class="moment-card__video-stats"
     >
       <span class="moment-card__video-stat-group">
-        <span v-if="showPlay">
+        <span v-if="showPlay && !statsInInfo">
           <span i-mingcute:play-circle-line aria-hidden="true" />
           {{ play }}
         </span>
@@ -116,7 +120,17 @@ function handlePreviewRef(element: Element | ComponentPublicInstance | null) {
     <p v-if="desc" class="moment-card__video-card-desc">
       {{ desc }}
     </p>
-    <small>
+    <small v-if="statsInInfo && (showPlay || showDanmaku)" class="moment-card__video-info-stats">
+      <span v-if="showPlay">
+        <span i-mingcute:play-circle-line aria-hidden="true" />
+        {{ play }}
+      </span>
+      <span v-if="showDanmaku">
+        <span i-mingcute:danmaku-line aria-hidden="true" />
+        {{ danmaku }}
+      </span>
+    </small>
+    <small v-else-if="!statsInInfo">
       <span i-tabler-user aria-hidden="true" />
       <a
         v-if="authorHref"
