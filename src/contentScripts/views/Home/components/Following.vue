@@ -1334,13 +1334,13 @@ defineExpose({ initData })
               >
                 <div i-mingcute:classify-2-fill text-lg />
               </div>
-              <div flex-1 overflow-hidden>
-                <div font-medium text-sm>
+              <div class="all-uploader-labels" flex-1 overflow-hidden>
+                <div font-medium>
                   {{ $t('topbar.moments_dropdown.tabs.all') }}
                 </div>
                 <div
+                  v-if="unreadUploadersCount > 0"
                   class="secondary-text"
-                  :style="{ visibility: unreadUploadersCount > 0 ? 'visible' : 'hidden' }"
                 >
                   {{ $t('home.uploaders_with_updates', { count: unreadUploadersCount }) }}
                 </div>
@@ -1497,6 +1497,16 @@ defineExpose({ initData })
 .uploader-button {
   width: 100%;
   text-align: start;
+}
+
+.all-uploader-labels {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  // 保持双行高度；没有更新提示时让单行标题居中，避免列表上下跳动。
+  min-height: calc(var(--bew-line-height-control) + var(--bew-line-height-caption));
+  font-size: var(--bew-font-size-control);
+  line-height: var(--bew-line-height-control);
 }
 
 .uploader-group-heading,
